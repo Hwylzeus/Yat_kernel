@@ -185,10 +185,24 @@ static inline int dl_policy(int policy)
 {
 	return policy == SCHED_DEADLINE;
 }
+
+#ifdef CONFIG_SCHED_CLASS_YAT
+static inline int yat_policy(int policy)
+{
+	return policy == SCHED_YAT;
+}
+#endif
+
 static inline bool valid_policy(int policy)
 {
+#ifdef CONFIG_SCHED_CLASS_YAT
+	return idle_policy(policy) || fair_policy(policy) ||
+		rt_policy(policy) || dl_policy(policy) || yat_policy(policy);
+#else
 	return idle_policy(policy) || fair_policy(policy) ||
 		rt_policy(policy) || dl_policy(policy);
+#endif
+
 }
 
 static inline int task_has_idle_policy(struct task_struct *p)
@@ -675,6 +689,47 @@ struct cfs_rq {
 #endif /* CONFIG_FAIR_GROUP_SCHED */
 };
 
+#ifdef CONFIG_SCHED_CLASS_YAT
+struct yat_rq {
+	struct task_struct *agent;	/* protected by e->lock and rq->lock */
+	uint32_t agent_barrier;
+	bool blocked_in_run;		/* agent is blocked in 'ghost_run()' */
+	bool agent_on_rq;		/* agent is on_rq */
+	bool agent_should_wake;		/* racy reads and writes */
+	uint64_t prev_resched_seq;	/* racy, cpu_seqnum to resched. DEPRECATED as of ABI 79. */
+	bool set_must_resched;		/* whether to force must_resched at reschedule */
+	bool must_resched;		/* rq->curr must reschedule in PNT */
+	bool ignore_prev_preemption;
+	bool check_prev_preemption;	/* see 'ghost_prepare_task_switch()' */
+	bool skip_latched_preemption;
+	bool in_pnt_bpf;		/* DEPRECATED: ABI 75 and older */
+	bool dont_idle_once;		/* Don't idle next time rq->idle runs */
+	int ghost_nr_running;
+	int run_flags;			/* flags passed to 'ghost_run()' */
+	uint64_t cpu_seqnum;		/* history for msgs about this cpu */
+
+	/* For deferring work to the balance_callback */
+	struct list_head enclave_work;	/* work to do */
+	struct callback_head ew_head;	/* callback management */
+
+	struct list_head tasks;
+
+	struct task_struct *latched_task;  /* task returned by pick_next_task */
+
+	long switchto_count;
+
+	/*
+	 * zero      not participating in a sync-group rendezvous.
+	 * negative  sync-group in process of committing.
+	 * positive  sync-group successfully committed.
+	 *
+	 * Thus a CPU must not return from __schedule() as long as
+	 * 'rq->ghost.rendezvous' is negative.
+	 */
+	int64_t rendezvous;
+};
+#endif /* CONFIG_SCHED_CLASS_YAT */
+
 static inline int rt_bandwidth_enabled(void)
 {
 	return sysctl_sched_rt_runtime >= 0;
@@ -1015,6 +1070,9 @@ struct rq {
 	struct cfs_rq		cfs;
 	struct rt_rq		rt;
 	struct dl_rq		dl;
+#ifdef CONFIG_SCHED_CLASS_YAT
+	struct yat_rq		yat;
+#endif
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	/* list of leaf cfs_rq on this CPU: */
@@ -3472,5 +3530,9 @@ static inline void init_sched_mm_cid(struct task_struct *t) { }
 
 extern u64 avg_vruntime(struct cfs_rq *cfs_rq);
 extern int entity_eligible(struct cfs_rq *cfs_rq, struct sched_entity *se);
+
+#ifdef CONFIG_SCHED_CLASS_YAT
+#include "yat.h"
+#endif
 
 #endif /* _KERNEL_SCHED_SCHED_H */

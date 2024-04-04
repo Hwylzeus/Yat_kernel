@@ -97,6 +97,13 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
 #endif
 #ifdef CONFIG_CGROUP_SCHED
 	.sched_task_group = &root_task_group,
+
+#ifdef CONFIG_SCHED_CLASS_YAT
+	.yat		= {
+		.slice		= 0,
+	},
+#endif
+
 #endif
 	.ptraced	= LIST_HEAD_INIT(init_task.ptraced),
 	.ptrace_entry	= LIST_HEAD_INIT(init_task.ptrace_entry),

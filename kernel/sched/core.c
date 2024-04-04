@@ -7066,6 +7066,10 @@ static void __setscheduler_prio(struct task_struct *p, int prio)
 		p->sched_class = &dl_sched_class;
 	else if (rt_prio(prio))
 		p->sched_class = &rt_sched_class;
+#ifdef CONFIG_SCHED_CLASS_YAT
+	else if (task_should_yat(p))
+		p->sched_class = &yat_sched_class;
+#endif
 	else
 		p->sched_class = &fair_sched_class;
 
@@ -8025,6 +8029,9 @@ EXPORT_SYMBOL_GPL(sched_set_normal);
 static int
 do_sched_setscheduler(pid_t pid, int policy, struct sched_param __user *param)
 {
+#ifdef CONFIG_SCHED_CLASS_YAT
+	printk("start %d\n", policy);
+#endif
 	struct sched_param lparam;
 
 	if (!param || pid < 0)
@@ -9902,10 +9909,18 @@ void __init sched_init(void)
 	unsigned long ptr = 0;
 	int i;
 
+#ifdef CONFIG_SCHED_CLASS_YAT
+	BUG_ON(&idle_sched_class != &yat_sched_class + 1 ||
+		   &yat_sched_class != &fair_sched_class + 1 ||
+	       &fair_sched_class != &rt_sched_class + 1 ||
+	       &rt_sched_class   != &dl_sched_class + 1);
+#else
 	/* Make sure the linker didn't screw up */
 	BUG_ON(&idle_sched_class != &fair_sched_class + 1 ||
 	       &fair_sched_class != &rt_sched_class + 1 ||
 	       &rt_sched_class   != &dl_sched_class + 1);
+#endif
+
 #ifdef CONFIG_SMP
 	BUG_ON(&dl_sched_class != &stop_sched_class + 1);
 #endif

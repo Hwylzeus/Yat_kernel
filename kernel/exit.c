@@ -811,6 +811,11 @@ static void synchronize_group_exit(struct task_struct *tsk, long code)
 void __noreturn do_exit(long code)
 {
 	struct task_struct *tsk = current;
+
+#ifdef CONFIG_SCHED_CLASS_YAT
+	printk("exit start %d\n", tsk->pid);
+#endif
+
 	int group_dead;
 
 	WARN_ON(irqs_disabled());

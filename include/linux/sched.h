@@ -80,6 +80,10 @@ struct task_group;
 struct task_struct;
 struct user_event_mm;
 
+#ifdef CONFIG_SCHED_CLASS_YAT
+#include <linux/sched/yat.h>
+#endif
+
 /*
  * Task state bitmask. NOTE! These bits are also
  * encoded in fs/proc/array.c: get_task_state().
@@ -797,6 +801,9 @@ struct task_struct {
 	struct sched_entity		se;
 	struct sched_rt_entity		rt;
 	struct sched_dl_entity		dl;
+#ifdef CONFIG_SCHED_CLASS_YAT
+	struct sched_yat_entity		yat;
+#endif
 	struct sched_dl_entity		*dl_server;
 	const struct sched_class	*sched_class;
 
