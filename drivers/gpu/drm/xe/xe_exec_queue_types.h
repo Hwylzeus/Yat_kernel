@@ -105,39 +105,48 @@ struct xe_exec_queue {
 		struct xe_guc_exec_queue *guc;
 	};
 
-	/**
-	 * @parallel: parallel submission state
-	 */
-	struct {
-		/** @parallel.composite_fence_ctx: context composite fence */
-		u64 composite_fence_ctx;
-		/** @parallel.composite_fence_seqno: seqno for composite fence */
-		u32 composite_fence_seqno;
-	} parallel;
+	union {
+		/**
+		 * @parallel: parallel submission state
+		 */
+		struct {
+			/** @composite_fence_ctx: context composite fence */
+			u64 composite_fence_ctx;
+			/** @composite_fence_seqno: seqno for composite fence */
+			u32 composite_fence_seqno;
+		} parallel;
+		/**
+		 * @bind: bind submission state
+		 */
+		struct {
+			/** @fence_ctx: context bind fence */
+			u64 fence_ctx;
+			/** @fence_seqno: seqno for bind fence */
+			u32 fence_seqno;
+		} bind;
+	};
 
 	/** @sched_props: scheduling properties */
 	struct {
-		/** @sched_props.timeslice_us: timeslice period in micro-seconds */
+		/** @timeslice_us: timeslice period in micro-seconds */
 		u32 timeslice_us;
-		/** @sched_props.preempt_timeout_us: preemption timeout in micro-seconds */
+		/** @preempt_timeout_us: preemption timeout in micro-seconds */
 		u32 preempt_timeout_us;
-		/** @sched_props.job_timeout_ms: job timeout in milliseconds */
-		u32 job_timeout_ms;
-		/** @sched_props.priority: priority of this exec queue */
+		/** @priority: priority of this exec queue */
 		enum xe_exec_queue_priority priority;
 	} sched_props;
 
 	/** @compute: compute exec queue state */
 	struct {
-		/** @compute.pfence: preemption fence */
+		/** @pfence: preemption fence */
 		struct dma_fence *pfence;
-		/** @compute.context: preemption fence context */
+		/** @context: preemption fence context */
 		u64 context;
-		/** @compute.seqno: preemption fence seqno */
+		/** @seqno: preemption fence seqno */
 		u32 seqno;
-		/** @compute.link: link into VM's list of exec queues */
+		/** @link: link into VM's list of exec queues */
 		struct list_head link;
-		/** @compute.lock: preemption fences lock */
+		/** @lock: preemption fences lock */
 		spinlock_t lock;
 	} compute;
 
@@ -169,6 +178,8 @@ struct xe_exec_queue_ops {
 	int (*set_timeslice)(struct xe_exec_queue *q, u32 timeslice_us);
 	/** @set_preempt_timeout: Set preemption timeout for exec queue */
 	int (*set_preempt_timeout)(struct xe_exec_queue *q, u32 preempt_timeout_us);
+	/** @set_job_timeout: Set job timeout for exec queue */
+	int (*set_job_timeout)(struct xe_exec_queue *q, u32 job_timeout_ms);
 	/**
 	 * @suspend: Suspend exec queue from executing, allowed to be called
 	 * multiple times in a row before resume with the caveat that

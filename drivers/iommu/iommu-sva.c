@@ -7,7 +7,7 @@
 #include <linux/sched/mm.h>
 #include <linux/iommu.h>
 
-#include "iommu-priv.h"
+#include "iommu-sva.h"
 
 static DEFINE_MUTEX(iommu_sva_lock);
 
@@ -176,25 +176,15 @@ u32 iommu_sva_get_pasid(struct iommu_sva *handle)
 }
 EXPORT_SYMBOL_GPL(iommu_sva_get_pasid);
 
-void mm_pasid_drop(struct mm_struct *mm)
-{
-	struct iommu_mm_data *iommu_mm = mm->iommu_mm;
-
-	if (!iommu_mm)
-		return;
-
-	iommu_free_global_pasid(iommu_mm->pasid);
-	kfree(iommu_mm);
-}
-
 /*
  * I/O page fault handler for SVA
  */
-static enum iommu_page_response_code
-iommu_sva_handle_mm(struct iommu_fault *fault, struct mm_struct *mm)
+enum iommu_page_response_code
+iommu_sva_handle_iopf(struct iommu_fault *fault, void *data)
 {
 	vm_fault_t ret;
 	struct vm_area_struct *vma;
+	struct mm_struct *mm = data;
 	unsigned int access_flags = 0;
 	unsigned int fault_flags = FAULT_FLAG_REMOTE;
 	struct iommu_fault_page_request *prm = &fault->prm;
@@ -244,54 +234,13 @@ out_put_mm:
 	return status;
 }
 
-static void iommu_sva_handle_iopf(struct work_struct *work)
+void mm_pasid_drop(struct mm_struct *mm)
 {
-	struct iopf_fault *iopf;
-	struct iopf_group *group;
-	enum iommu_page_response_code status = IOMMU_PAGE_RESP_SUCCESS;
+	struct iommu_mm_data *iommu_mm = mm->iommu_mm;
 
-	group = container_of(work, struct iopf_group, work);
-	list_for_each_entry(iopf, &group->faults, list) {
-		/*
-		 * For the moment, errors are sticky: don't handle subsequent
-		 * faults in the group if there is an error.
-		 */
-		if (status != IOMMU_PAGE_RESP_SUCCESS)
-			break;
+	if (!iommu_mm)
+		return;
 
-		status = iommu_sva_handle_mm(&iopf->fault, group->domain->mm);
-	}
-
-	iopf_group_response(group, status);
-	iopf_free_group(group);
-}
-
-static int iommu_sva_iopf_handler(struct iopf_group *group)
-{
-	struct iommu_fault_param *fault_param = group->fault_param;
-
-	INIT_WORK(&group->work, iommu_sva_handle_iopf);
-	if (!queue_work(fault_param->queue->wq, &group->work))
-		return -EBUSY;
-
-	return 0;
-}
-
-struct iommu_domain *iommu_sva_domain_alloc(struct device *dev,
-					    struct mm_struct *mm)
-{
-	const struct iommu_ops *ops = dev_iommu_ops(dev);
-	struct iommu_domain *domain;
-
-	domain = ops->domain_alloc(IOMMU_DOMAIN_SVA);
-	if (!domain)
-		return NULL;
-
-	domain->type = IOMMU_DOMAIN_SVA;
-	mmgrab(mm);
-	domain->mm = mm;
-	domain->owner = ops;
-	domain->iopf_handler = iommu_sva_iopf_handler;
-
-	return domain;
+	iommu_free_global_pasid(iommu_mm->pasid);
+	kfree(iommu_mm);
 }

@@ -72,6 +72,8 @@ allOf:
         i2c-bus: false
     else:
       $ref: /schemas/usb/usb-device.yaml
+      required:
+        - peer-hub
 
 additionalProperties: false
 

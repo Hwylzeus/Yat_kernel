@@ -35,9 +35,8 @@ can be triggered by Linux).
 For software workarounds that may adversely impact systems unaffected by
 the erratum in question, a Kconfig entry is added under "Kernel
 Features" -> "ARM errata workarounds via the alternatives framework".
-With the exception of workarounds for errata deemed "rare" by Arm, these
-are enabled by default and patched in at runtime when an affected CPU is
-detected. For less-intrusive workarounds, a Kconfig option is not
+These are enabled by default and patched in at runtime when an affected
+CPU is detected. For less-intrusive workarounds, a Kconfig option is not
 available and the code is structured (preferably with a comment) in such
 a way that the erratum will not be hit.
 

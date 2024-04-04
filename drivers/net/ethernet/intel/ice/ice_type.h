@@ -132,7 +132,6 @@ enum ice_mac_type {
 	ICE_MAC_E810,
 	ICE_MAC_E830,
 	ICE_MAC_GENERIC,
-	ICE_MAC_GENERIC_3K_E825,
 };
 
 /* Media Types */

@@ -271,10 +271,11 @@ static int pwm_regulator_init_table(struct platform_device *pdev,
 	of_find_property(np, "voltage-table", &length);
 
 	if ((length < sizeof(*duty_cycle_table)) ||
-	    (length % sizeof(*duty_cycle_table)))
-		return dev_err_probe(&pdev->dev, -EINVAL,
-				     "voltage-table length(%d) is invalid\n",
-				     length);
+	    (length % sizeof(*duty_cycle_table))) {
+		dev_err(&pdev->dev, "voltage-table length(%d) is invalid\n",
+			length);
+		return -EINVAL;
+	}
 
 	duty_cycle_table = devm_kzalloc(&pdev->dev, length, GFP_KERNEL);
 	if (!duty_cycle_table)
@@ -283,9 +284,10 @@ static int pwm_regulator_init_table(struct platform_device *pdev,
 	ret = of_property_read_u32_array(np, "voltage-table",
 					 (u32 *)duty_cycle_table,
 					 length / sizeof(u32));
-	if (ret)
-		return dev_err_probe(&pdev->dev, ret,
-				     "Failed to read voltage-table\n");
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to read voltage-table: %d\n", ret);
+		return ret;
+	}
 
 	drvdata->state			= -ENOTRECOVERABLE;
 	drvdata->duty_cycle_table	= duty_cycle_table;
@@ -357,9 +359,10 @@ static int pwm_regulator_probe(struct platform_device *pdev)
 	enum gpiod_flags gpio_flags;
 	int ret;
 
-	if (!np)
-		return dev_err_probe(&pdev->dev, -EINVAL,
-				     "Device Tree node missing\n");
+	if (!np) {
+		dev_err(&pdev->dev, "Device Tree node missing\n");
+		return -EINVAL;
+	}
 
 	drvdata = devm_kzalloc(&pdev->dev, sizeof(*drvdata), GFP_KERNEL);
 	if (!drvdata)
@@ -397,7 +400,8 @@ static int pwm_regulator_probe(struct platform_device *pdev)
 						    gpio_flags);
 	if (IS_ERR(drvdata->enb_gpio)) {
 		ret = PTR_ERR(drvdata->enb_gpio);
-		return dev_err_probe(&pdev->dev, ret, "Failed to get enable GPIO\n");
+		dev_err(&pdev->dev, "Failed to get enable GPIO: %d\n", ret);
+		return ret;
 	}
 
 	ret = pwm_adjust_config(drvdata->pwm);
@@ -405,17 +409,19 @@ static int pwm_regulator_probe(struct platform_device *pdev)
 		return ret;
 
 	ret = pwm_regulator_init_boot_on(pdev, drvdata, init_data);
-	if (ret)
-		return dev_err_probe(&pdev->dev, ret,
-				     "Failed to apply boot_on settings\n");
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to apply boot_on settings: %d\n",
+			ret);
+		return ret;
+	}
 
 	regulator = devm_regulator_register(&pdev->dev,
 					    &drvdata->desc, &config);
 	if (IS_ERR(regulator)) {
 		ret = PTR_ERR(regulator);
-		return dev_err_probe(&pdev->dev, ret,
-				     "Failed to register regulator %s\n",
-				     drvdata->desc.name);
+		dev_err(&pdev->dev, "Failed to register regulator %s: %d\n",
+			drvdata->desc.name, ret);
+		return ret;
 	}
 
 	return 0;

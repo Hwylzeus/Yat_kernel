@@ -30,7 +30,6 @@ static void bcmgenet_mac_config(struct net_device *dev)
 	struct bcmgenet_priv *priv = netdev_priv(dev);
 	struct phy_device *phydev = dev->phydev;
 	u32 reg, cmd_bits = 0;
-	bool active;
 
 	/* speed */
 	if (phydev->speed == SPEED_1000)
@@ -89,9 +88,9 @@ static void bcmgenet_mac_config(struct net_device *dev)
 	}
 	bcmgenet_umac_writel(priv, reg, UMAC_CMD);
 
-	active = phy_init_eee(phydev, 0) >= 0;
+	priv->eee.eee_active = phy_init_eee(phydev, 0) >= 0;
 	bcmgenet_eee_enable_set(dev,
-				priv->eee.eee_enabled && active,
+				priv->eee.eee_enabled && priv->eee.eee_active,
 				priv->eee.tx_lpi_enabled);
 }
 
@@ -476,10 +475,6 @@ static int bcmgenet_mii_register(struct bcmgenet_priv *priv)
 	ppd.wait_func = bcmgenet_mii_wait;
 	ppd.wait_func_data = priv;
 	ppd.bus_name = "bcmgenet MII bus";
-	/* Pass a reference to our "main" clock which is used for MDIO
-	 * transfers
-	 */
-	ppd.clk = priv->clk;
 
 	/* Unimac MDIO bus controller starts at UniMAC offset + MDIO_CMD
 	 * and is 2 * 32-bits word long, 8 bytes total.
@@ -678,5 +673,7 @@ void bcmgenet_mii_exit(struct net_device *dev)
 	if (of_phy_is_fixed_link(dn))
 		of_phy_deregister_fixed_link(dn);
 	of_node_put(priv->phy_dn);
+	clk_prepare_enable(priv->clk);
 	platform_device_unregister(priv->mii_pdev);
+	clk_disable_unprepare(priv->clk);
 }

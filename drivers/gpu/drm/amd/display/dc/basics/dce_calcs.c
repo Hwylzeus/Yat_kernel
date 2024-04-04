@@ -23,6 +23,8 @@
  *
  */
 
+#include <linux/slab.h>
+
 #include "resource.h"
 #include "dm_services.h"
 #include "dce_calcs.h"

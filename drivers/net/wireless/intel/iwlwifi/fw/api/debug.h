@@ -394,7 +394,7 @@ struct iwl_buf_alloc_cmd {
  *
  * @first_word: magic word value
  * @second_word: magic word value
- * @dram_frags: DRAM fragmentaion detail
+ * @framfrags: DRAM fragmentaion detail
 */
 struct iwl_dram_info {
 	__le32 first_word;

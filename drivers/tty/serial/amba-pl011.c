@@ -348,7 +348,10 @@ static int pl011_fifo_to_tty(struct uart_amba_port *uap)
 				flag = TTY_FRAME;
 		}
 
-		sysrq = uart_prepare_sysrq_char(&uap->port, ch & 255);
+		uart_port_unlock(&uap->port);
+		sysrq = uart_handle_sysrq_char(&uap->port, ch & 255);
+		uart_port_lock(&uap->port);
+
 		if (!sysrq)
 			uart_insert_char(&uap->port, ch, UART011_DR_OE, ch, flag);
 	}
@@ -1014,7 +1017,7 @@ static void pl011_dma_rx_callback(void *data)
 	ret = pl011_dma_rx_trigger_dma(uap);
 
 	pl011_dma_rx_chars(uap, pending, lastbuf, false);
-	uart_unlock_and_check_sysrq(&uap->port);
+	uart_port_unlock_irq(&uap->port);
 	/*
 	 * Do this check after we picked the DMA chars so we don't
 	 * get some IRQ immediately from RX.
@@ -1537,10 +1540,11 @@ static void check_apply_cts_event_workaround(struct uart_amba_port *uap)
 static irqreturn_t pl011_int(int irq, void *dev_id)
 {
 	struct uart_amba_port *uap = dev_id;
+	unsigned long flags;
 	unsigned int status, pass_counter = AMBA_ISR_PASS_LIMIT;
 	int handled = 0;
 
-	uart_port_lock(&uap->port);
+	uart_port_lock_irqsave(&uap->port, &flags);
 	status = pl011_read(uap, REG_RIS) & uap->im;
 	if (status) {
 		do {
@@ -1569,7 +1573,7 @@ static irqreturn_t pl011_int(int irq, void *dev_id)
 		handled = 1;
 	}
 
-	uart_unlock_and_check_sysrq(&uap->port);
+	uart_port_unlock_irqrestore(&uap->port, flags);
 
 	return IRQ_RETVAL(handled);
 }
@@ -2318,10 +2322,13 @@ pl011_console_write(struct console *co, const char *s, unsigned int count)
 
 	clk_enable(uap->clk);
 
-	if (oops_in_progress)
-		locked = uart_port_trylock_irqsave(&uap->port, &flags);
+	local_irq_save(flags);
+	if (uap->port.sysrq)
+		locked = 0;
+	else if (oops_in_progress)
+		locked = uart_port_trylock(&uap->port);
 	else
-		uart_port_lock_irqsave(&uap->port, &flags);
+		uart_port_lock(&uap->port);
 
 	/*
 	 *	First save the CR then disable the interrupts
@@ -2347,7 +2354,8 @@ pl011_console_write(struct console *co, const char *s, unsigned int count)
 		pl011_write(old_cr, uap, REG_CR);
 
 	if (locked)
-		uart_port_unlock_irqrestore(&uap->port, flags);
+		uart_port_unlock(&uap->port);
+	local_irq_restore(flags);
 
 	clk_disable(uap->clk);
 }

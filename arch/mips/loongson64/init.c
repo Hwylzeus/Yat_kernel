@@ -180,7 +180,7 @@ static int __init add_legacy_isa_io(struct fwnode_handle *fwnode, resource_size_
 
 	vaddr = PCI_IOBASE + range->io_start;
 
-	vmap_page_range(vaddr, vaddr + size, hw_start, pgprot_device(PAGE_KERNEL));
+	ioremap_page_range(vaddr, vaddr + size, hw_start, pgprot_device(PAGE_KERNEL));
 
 	return 0;
 }

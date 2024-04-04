@@ -918,6 +918,7 @@ static const struct amdgpu_asic_funcs aqua_vanjaram_asic_funcs =
 	.get_config_memsize = &soc15_get_config_memsize,
 	.need_full_reset = &soc15_need_full_reset,
 	.init_doorbell_index = &aqua_vanjaram_doorbell_index_init,
+	.get_pcie_usage = &amdgpu_nbio_get_pcie_usage,
 	.need_reset_on_init = &soc15_need_reset_on_init,
 	.get_pcie_replay_count = &amdgpu_nbio_get_pcie_replay_count,
 	.supports_baco = &soc15_supports_baco,
@@ -1300,8 +1301,7 @@ static int soc15_common_hw_fini(void *handle)
 	if (amdgpu_sriov_vf(adev))
 		xgpu_ai_mailbox_put_irq(adev);
 
-	if ((!amdgpu_sriov_vf(adev)) &&
-	    adev->nbio.ras_if &&
+	if (adev->nbio.ras_if &&
 	    amdgpu_ras_is_supported(adev, adev->nbio.ras_if->block)) {
 		if (adev->nbio.ras &&
 		    adev->nbio.ras->init_ras_controller_interrupt)

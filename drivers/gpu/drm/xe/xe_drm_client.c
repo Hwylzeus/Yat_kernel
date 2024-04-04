@@ -113,7 +113,7 @@ static void bo_meminfo(struct xe_bo *bo,
 	else
 		mem_type = XE_PL_TT;
 
-	if (drm_gem_object_is_shared_for_memory_stats(&bo->ttm.base))
+	if (bo->ttm.base.handle_count > 1)
 		stats[mem_type].shared += sz;
 	else
 		stats[mem_type].private += sz;

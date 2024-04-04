@@ -174,7 +174,6 @@ const struct fs_parameter_spec smb3_fs_parameters[] = {
 	fsparam_string("vers", Opt_vers),
 	fsparam_string("sec", Opt_sec),
 	fsparam_string("cache", Opt_cache),
-	fsparam_string("reparse", Opt_reparse),
 
 	/* Arguments that should be ignored */
 	fsparam_flag("guest", Opt_ignore),
@@ -292,35 +291,6 @@ cifs_parse_cache_flavor(struct fs_context *fc, char *value, struct smb3_fs_conte
 		break;
 	default:
 		cifs_errorf(fc, "bad cache= option: %s\n", value);
-		return 1;
-	}
-	return 0;
-}
-
-static const match_table_t reparse_flavor_tokens = {
-	{ Opt_reparse_default,	"default" },
-	{ Opt_reparse_nfs,	"nfs" },
-	{ Opt_reparse_wsl,	"wsl" },
-	{ Opt_reparse_err,	NULL },
-};
-
-static int parse_reparse_flavor(struct fs_context *fc, char *value,
-				struct smb3_fs_context *ctx)
-{
-	substring_t args[MAX_OPT_ARGS];
-
-	switch (match_token(value, reparse_flavor_tokens, args)) {
-	case Opt_reparse_default:
-		ctx->reparse_type = CIFS_REPARSE_TYPE_DEFAULT;
-		break;
-	case Opt_reparse_nfs:
-		ctx->reparse_type = CIFS_REPARSE_TYPE_NFS;
-		break;
-	case Opt_reparse_wsl:
-		ctx->reparse_type = CIFS_REPARSE_TYPE_WSL;
-		break;
-	default:
-		cifs_errorf(fc, "bad reparse= option: %s\n", value);
 		return 1;
 	}
 	return 0;
@@ -802,7 +772,7 @@ static void smb3_fs_context_free(struct fs_context *fc)
  */
 static int smb3_verify_reconfigure_ctx(struct fs_context *fc,
 				       struct smb3_fs_context *new_ctx,
-				       struct smb3_fs_context *old_ctx, bool need_recon)
+				       struct smb3_fs_context *old_ctx)
 {
 	if (new_ctx->posix_paths != old_ctx->posix_paths) {
 		cifs_errorf(fc, "can not change posixpaths during remount\n");
@@ -828,15 +798,8 @@ static int smb3_verify_reconfigure_ctx(struct fs_context *fc,
 	}
 	if (new_ctx->password &&
 	    (!old_ctx->password || strcmp(new_ctx->password, old_ctx->password))) {
-		if (need_recon == false) {
-			cifs_errorf(fc,
-				    "can not change password of active session during remount\n");
-			return -EINVAL;
-		} else if (old_ctx->sectype == Kerberos) {
-			cifs_errorf(fc,
-				    "can not change password for Kerberos via remount\n");
-			return -EINVAL;
-		}
+		cifs_errorf(fc, "can not change password during remount\n");
+		return -EINVAL;
 	}
 	if (new_ctx->domainname &&
 	    (!old_ctx->domainname || strcmp(new_ctx->domainname, old_ctx->domainname))) {
@@ -880,14 +843,9 @@ static int smb3_reconfigure(struct fs_context *fc)
 	struct smb3_fs_context *ctx = smb3_fc2context(fc);
 	struct dentry *root = fc->root;
 	struct cifs_sb_info *cifs_sb = CIFS_SB(root->d_sb);
-	struct cifs_ses *ses = cifs_sb_master_tcon(cifs_sb)->ses;
-	bool need_recon = false;
 	int rc;
 
-	if (ses->expired_pwd)
-		need_recon = true;
-
-	rc = smb3_verify_reconfigure_ctx(fc, ctx, cifs_sb->ctx, need_recon);
+	rc = smb3_verify_reconfigure_ctx(fc, ctx, cifs_sb->ctx);
 	if (rc)
 		return rc;
 
@@ -900,12 +858,7 @@ static int smb3_reconfigure(struct fs_context *fc)
 	STEAL_STRING(cifs_sb, ctx, UNC);
 	STEAL_STRING(cifs_sb, ctx, source);
 	STEAL_STRING(cifs_sb, ctx, username);
-	if (need_recon == false)
-		STEAL_STRING_SENSITIVE(cifs_sb, ctx, password);
-	else  {
-		kfree_sensitive(ses->password);
-		ses->password = kstrdup(ctx->password, GFP_KERNEL);
-	}
+	STEAL_STRING_SENSITIVE(cifs_sb, ctx, password);
 	STEAL_STRING(cifs_sb, ctx, domainname);
 	STEAL_STRING(cifs_sb, ctx, nodename);
 	STEAL_STRING(cifs_sb, ctx, iocharset);
@@ -963,7 +916,7 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 
 	switch (opt) {
 	case Opt_compress:
-		ctx->compress = true;
+		ctx->compression = UNKNOWN_TYPE;
 		cifs_dbg(VFS,
 			"SMB3 compression support is experimental\n");
 		break;
@@ -1596,10 +1549,6 @@ static int smb3_fs_context_parse_param(struct fs_context *fc,
 	case Opt_rdma:
 		ctx->rdma = true;
 		break;
-	case Opt_reparse:
-		if (parse_reparse_flavor(fc, param->string, ctx))
-			goto cifs_parse_mount_err;
-		break;
 	}
 	/* case Opt_ignore: - is ignored as expected ... */
 
@@ -1686,7 +1635,6 @@ int smb3_init_fs_context(struct fs_context *fc)
 	ctx->backupgid_specified = false; /* no backup intent for a group */
 
 	ctx->retrans = 1;
-	ctx->reparse_type = CIFS_REPARSE_TYPE_DEFAULT;
 
 /*
  *	short int override_uid = -1;

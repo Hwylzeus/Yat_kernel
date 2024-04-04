@@ -254,8 +254,7 @@ static int l2cap_sock_connect(struct socket *sock, struct sockaddr *addr,
 		chan->mode = L2CAP_MODE_LE_FLOWCTL;
 
 	err = l2cap_chan_connect(chan, la.l2_psm, __le16_to_cpu(la.l2_cid),
-				 &la.l2_bdaddr, la.l2_bdaddr_type,
-				 sk->sk_sndtimeo);
+				 &la.l2_bdaddr, la.l2_bdaddr_type);
 	if (err)
 		return err;
 
@@ -1028,7 +1027,23 @@ static int l2cap_sock_setsockopt(struct socket *sock, int level, int optname,
 			break;
 		}
 
-		err = -EOPNOTSUPP;
+		if (opt > BT_CHANNEL_POLICY_AMP_PREFERRED) {
+			err = -EINVAL;
+			break;
+		}
+
+		if (chan->mode != L2CAP_MODE_ERTM &&
+		    chan->mode != L2CAP_MODE_STREAMING) {
+			err = -EOPNOTSUPP;
+			break;
+		}
+
+		chan->chan_policy = (u8) opt;
+
+		if (sk->sk_state == BT_CONNECTED &&
+		    chan->move_role == L2CAP_MOVE_ROLE_NONE)
+			l2cap_move_start(chan);
+
 		break;
 
 	case BT_SNDMTU:

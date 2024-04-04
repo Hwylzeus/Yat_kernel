@@ -70,9 +70,15 @@
 #define NFT_PIPAPO_ALIGN_HEADROOM					\
 	(NFT_PIPAPO_ALIGN - ARCH_KMALLOC_MINALIGN)
 #define NFT_PIPAPO_LT_ALIGN(lt)		(PTR_ALIGN((lt), NFT_PIPAPO_ALIGN))
+#define NFT_PIPAPO_LT_ASSIGN(field, x)					\
+	do {								\
+		(field)->lt_aligned = NFT_PIPAPO_LT_ALIGN(x);		\
+		(field)->lt = (x);					\
+	} while (0)
 #else
 #define NFT_PIPAPO_ALIGN_HEADROOM	0
 #define NFT_PIPAPO_LT_ALIGN(lt)		(lt)
+#define NFT_PIPAPO_LT_ASSIGN(field, x)	((field)->lt = (x))
 #endif /* NFT_PIPAPO_ALIGN */
 
 #define nft_pipapo_for_each_field(field, index, match)		\
@@ -104,20 +110,22 @@ union nft_pipapo_map_bucket {
 
 /**
  * struct nft_pipapo_field - Lookup, mapping tables and related data for a field
+ * @groups:	Amount of bit groups
  * @rules:	Number of inserted rules
  * @bsize:	Size of each bucket in lookup table, in longs
- * @rules_alloc: Number of allocated rules, always >= rules
- * @groups:	Amount of bit groups
  * @bb:		Number of bits grouped together in lookup table buckets
  * @lt:		Lookup table: 'groups' rows of buckets
+ * @lt_aligned:	Version of @lt aligned to NFT_PIPAPO_ALIGN bytes
  * @mt:		Mapping table: one bucket per rule
  */
 struct nft_pipapo_field {
-	unsigned int rules;
-	unsigned int bsize;
-	unsigned int rules_alloc;
-	u8 groups;
-	u8 bb;
+	int groups;
+	unsigned long rules;
+	size_t bsize;
+	int bb;
+#ifdef NFT_PIPAPO_ALIGN
+	unsigned long *lt_aligned;
+#endif
 	unsigned long *lt;
 	union nft_pipapo_map_bucket *mt;
 };
@@ -137,15 +145,15 @@ struct nft_pipapo_scratch {
 /**
  * struct nft_pipapo_match - Data used for lookup and matching
  * @field_count:	Amount of fields in set
- * @bsize_max:		Maximum lookup table bucket size of all fields, in longs
  * @scratch:		Preallocated per-CPU maps for partial matching results
+ * @bsize_max:		Maximum lookup table bucket size of all fields, in longs
  * @rcu:		Matching data is swapped on commits
  * @f:			Fields, with lookup and mapping tables
  */
 struct nft_pipapo_match {
-	u8 field_count;
-	unsigned int bsize_max;
+	int field_count;
 	struct nft_pipapo_scratch * __percpu *scratch;
+	size_t bsize_max;
 	struct rcu_head rcu;
 	struct nft_pipapo_field f[] __counted_by(field_count);
 };
@@ -178,9 +186,8 @@ struct nft_pipapo_elem {
 	struct nft_set_ext	ext;
 };
 
-int pipapo_refill(unsigned long *map, unsigned int len, unsigned int rules,
-		  unsigned long *dst,
-		  const union nft_pipapo_map_bucket *mt, bool match_only);
+int pipapo_refill(unsigned long *map, int len, int rules, unsigned long *dst,
+		  union nft_pipapo_map_bucket *mt, bool match_only);
 
 /**
  * pipapo_and_field_buckets_4bit() - Intersect 4-bit buckets
@@ -188,7 +195,7 @@ int pipapo_refill(unsigned long *map, unsigned int len, unsigned int rules,
  * @dst:	Area to store result
  * @data:	Input data selecting table buckets
  */
-static inline void pipapo_and_field_buckets_4bit(const struct nft_pipapo_field *f,
+static inline void pipapo_and_field_buckets_4bit(struct nft_pipapo_field *f,
 						 unsigned long *dst,
 						 const u8 *data)
 {
@@ -216,7 +223,7 @@ static inline void pipapo_and_field_buckets_4bit(const struct nft_pipapo_field *
  * @dst:	Area to store result
  * @data:	Input data selecting table buckets
  */
-static inline void pipapo_and_field_buckets_8bit(const struct nft_pipapo_field *f,
+static inline void pipapo_and_field_buckets_8bit(struct nft_pipapo_field *f,
 						 unsigned long *dst,
 						 const u8 *data)
 {

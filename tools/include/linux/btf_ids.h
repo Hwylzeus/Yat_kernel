@@ -8,15 +8,6 @@ struct btf_id_set {
 	u32 ids[];
 };
 
-struct btf_id_set8 {
-	u32 cnt;
-	u32 flags;
-	struct {
-		u32 id;
-		u32 flags;
-	} pairs[];
-};
-
 #ifdef CONFIG_DEBUG_INFO_BTF
 
 #include <linux/compiler.h> /* for __PASTE */

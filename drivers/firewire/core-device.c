@@ -322,8 +322,7 @@ static ssize_t show_immediate(struct device *dev,
 	if (value < 0)
 		return -ENOENT;
 
-	// Note that this function is also called by init_fw_attribute_group() with NULL pointer.
-	return buf ? sysfs_emit(buf, "0x%06x\n", value) : 0;
+	return snprintf(buf, buf ? PAGE_SIZE : 0, "0x%06x\n", value);
 }
 
 #define IMMEDIATE_ATTR(name, key)				\
@@ -358,7 +357,6 @@ static ssize_t show_text_leaf(struct device *dev,
 		}
 	}
 
-	// Note that this function is also called by init_fw_attribute_group() with NULL pointer.
 	if (buf) {
 		bufsize = PAGE_SIZE - 1;
 	} else {
@@ -492,7 +490,7 @@ static ssize_t is_local_show(struct device *dev,
 {
 	struct fw_device *device = fw_device(dev);
 
-	return sysfs_emit(buf, "%u\n", device->is_local);
+	return sprintf(buf, "%u\n", device->is_local);
 }
 
 static int units_sprintf(char *buf, const u32 *directory)

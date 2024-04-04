@@ -1455,7 +1455,7 @@ err:
 	return rc;
 }
 
-static void ghes_remove(struct platform_device *ghes_dev)
+static int ghes_remove(struct platform_device *ghes_dev)
 {
 	int rc;
 	struct ghes *ghes;
@@ -1492,15 +1492,8 @@ static void ghes_remove(struct platform_device *ghes_dev)
 		break;
 	case ACPI_HEST_NOTIFY_SOFTWARE_DELEGATED:
 		rc = apei_sdei_unregister_ghes(ghes);
-		if (rc) {
-			/*
-			 * Returning early results in a resource leak, but we're
-			 * only here if stopping the hardware failed.
-			 */
-			dev_err(&ghes_dev->dev, "Failed to unregister ghes (%pe)\n",
-				ERR_PTR(rc));
-			return;
-		}
+		if (rc)
+			return rc;
 		break;
 	default:
 		BUG();
@@ -1514,6 +1507,8 @@ static void ghes_remove(struct platform_device *ghes_dev)
 	mutex_unlock(&ghes_devs_mutex);
 
 	kfree(ghes);
+
+	return 0;
 }
 
 static struct platform_driver ghes_platform_driver = {
@@ -1521,7 +1516,7 @@ static struct platform_driver ghes_platform_driver = {
 		.name	= "GHES",
 	},
 	.probe		= ghes_probe,
-	.remove_new	= ghes_remove,
+	.remove		= ghes_remove,
 };
 
 void __init acpi_ghes_init(void)

@@ -329,7 +329,7 @@ int cifs_posix_open(const char *full_path, struct inode **pinode,
 		}
 	} else {
 		cifs_revalidate_mapping(*pinode);
-		rc = cifs_fattr_to_inode(*pinode, &fattr, false);
+		rc = cifs_fattr_to_inode(*pinode, &fattr);
 	}
 
 posix_open_ret:
@@ -1072,19 +1072,6 @@ void smb2_deferred_work_close(struct work_struct *work)
 	_cifsFileInfo_put(cfile, true, false);
 }
 
-static bool
-smb2_can_defer_close(struct inode *inode, struct cifs_deferred_close *dclose)
-{
-	struct cifs_sb_info *cifs_sb = CIFS_SB(inode->i_sb);
-	struct cifsInodeInfo *cinode = CIFS_I(inode);
-
-	return (cifs_sb->ctx->closetimeo && cinode->lease_granted && dclose &&
-			(cinode->oplock == CIFS_CACHE_RHW_FLG ||
-			 cinode->oplock == CIFS_CACHE_RH_FLG) &&
-			!test_bit(CIFS_INO_CLOSE_ON_LOCK, &cinode->flags));
-
-}
-
 int cifs_close(struct inode *inode, struct file *file)
 {
 	struct cifsFileInfo *cfile;
@@ -1098,8 +1085,10 @@ int cifs_close(struct inode *inode, struct file *file)
 		cfile = file->private_data;
 		file->private_data = NULL;
 		dclose = kmalloc(sizeof(struct cifs_deferred_close), GFP_KERNEL);
-		if ((cfile->status_file_deleted == false) &&
-		    (smb2_can_defer_close(inode, dclose))) {
+		if ((cifs_sb->ctx->closetimeo && cinode->oplock == CIFS_CACHE_RHW_FLG)
+		    && cinode->lease_granted &&
+		    !test_bit(CIFS_INO_CLOSE_ON_LOCK, &cinode->flags) &&
+		    dclose) {
 			if (test_and_clear_bit(CIFS_INO_MODIFIED_ATTR, &cinode->flags)) {
 				inode_set_mtime_to_ts(inode,
 						      inode_set_ctime_current(inode));
@@ -1326,20 +1315,20 @@ cifs_lock_test(struct cifsFileInfo *cfile, __u64 offset, __u64 length,
 	down_read(&cinode->lock_sem);
 
 	exist = cifs_find_lock_conflict(cfile, offset, length, type,
-					flock->c.flc_flags, &conf_lock,
+					flock->fl_flags, &conf_lock,
 					CIFS_LOCK_OP);
 	if (exist) {
 		flock->fl_start = conf_lock->offset;
 		flock->fl_end = conf_lock->offset + conf_lock->length - 1;
-		flock->c.flc_pid = conf_lock->pid;
+		flock->fl_pid = conf_lock->pid;
 		if (conf_lock->type & server->vals->shared_lock_type)
-			flock->c.flc_type = F_RDLCK;
+			flock->fl_type = F_RDLCK;
 		else
-			flock->c.flc_type = F_WRLCK;
+			flock->fl_type = F_WRLCK;
 	} else if (!cinode->can_cache_brlcks)
 		rc = 1;
 	else
-		flock->c.flc_type = F_UNLCK;
+		flock->fl_type = F_UNLCK;
 
 	up_read(&cinode->lock_sem);
 	return rc;
@@ -1415,16 +1404,16 @@ cifs_posix_lock_test(struct file *file, struct file_lock *flock)
 {
 	int rc = 0;
 	struct cifsInodeInfo *cinode = CIFS_I(file_inode(file));
-	unsigned char saved_type = flock->c.flc_type;
+	unsigned char saved_type = flock->fl_type;
 
-	if ((flock->c.flc_flags & FL_POSIX) == 0)
+	if ((flock->fl_flags & FL_POSIX) == 0)
 		return 1;
 
 	down_read(&cinode->lock_sem);
 	posix_test_lock(file, flock);
 
-	if (lock_is_unlock(flock) && !cinode->can_cache_brlcks) {
-		flock->c.flc_type = saved_type;
+	if (flock->fl_type == F_UNLCK && !cinode->can_cache_brlcks) {
+		flock->fl_type = saved_type;
 		rc = 1;
 	}
 
@@ -1445,7 +1434,7 @@ cifs_posix_lock_set(struct file *file, struct file_lock *flock)
 	struct cifsInodeInfo *cinode = CIFS_I(file_inode(file));
 	int rc = FILE_LOCK_DEFERRED + 1;
 
-	if ((flock->c.flc_flags & FL_POSIX) == 0)
+	if ((flock->fl_flags & FL_POSIX) == 0)
 		return rc;
 
 	cifs_down_write(&cinode->lock_sem);
@@ -1595,9 +1584,7 @@ cifs_push_posix_locks(struct cifsFileInfo *cfile)
 
 	el = locks_to_send.next;
 	spin_lock(&flctx->flc_lock);
-	for_each_file_lock(flock, &flctx->flc_posix) {
-		unsigned char ftype = flock->c.flc_type;
-
+	list_for_each_entry(flock, &flctx->flc_posix, fl_list) {
 		if (el == &locks_to_send) {
 			/*
 			 * The list ended. We don't have enough allocated
@@ -1607,12 +1594,12 @@ cifs_push_posix_locks(struct cifsFileInfo *cfile)
 			break;
 		}
 		length = cifs_flock_len(flock);
-		if (ftype == F_RDLCK || ftype == F_SHLCK)
+		if (flock->fl_type == F_RDLCK || flock->fl_type == F_SHLCK)
 			type = CIFS_RDLCK;
 		else
 			type = CIFS_WRLCK;
 		lck = list_entry(el, struct lock_to_push, llist);
-		lck->pid = hash_lockowner(flock->c.flc_owner);
+		lck->pid = hash_lockowner(flock->fl_owner);
 		lck->netfid = cfile->fid.netfid;
 		lck->length = length;
 		lck->type = type;
@@ -1679,43 +1666,42 @@ static void
 cifs_read_flock(struct file_lock *flock, __u32 *type, int *lock, int *unlock,
 		bool *wait_flag, struct TCP_Server_Info *server)
 {
-	if (flock->c.flc_flags & FL_POSIX)
+	if (flock->fl_flags & FL_POSIX)
 		cifs_dbg(FYI, "Posix\n");
-	if (flock->c.flc_flags & FL_FLOCK)
+	if (flock->fl_flags & FL_FLOCK)
 		cifs_dbg(FYI, "Flock\n");
-	if (flock->c.flc_flags & FL_SLEEP) {
+	if (flock->fl_flags & FL_SLEEP) {
 		cifs_dbg(FYI, "Blocking lock\n");
 		*wait_flag = true;
 	}
-	if (flock->c.flc_flags & FL_ACCESS)
+	if (flock->fl_flags & FL_ACCESS)
 		cifs_dbg(FYI, "Process suspended by mandatory locking - not implemented yet\n");
-	if (flock->c.flc_flags & FL_LEASE)
+	if (flock->fl_flags & FL_LEASE)
 		cifs_dbg(FYI, "Lease on file - not implemented yet\n");
-	if (flock->c.flc_flags &
+	if (flock->fl_flags &
 	    (~(FL_POSIX | FL_FLOCK | FL_SLEEP |
 	       FL_ACCESS | FL_LEASE | FL_CLOSE | FL_OFDLCK)))
-		cifs_dbg(FYI, "Unknown lock flags 0x%x\n",
-		         flock->c.flc_flags);
+		cifs_dbg(FYI, "Unknown lock flags 0x%x\n", flock->fl_flags);
 
 	*type = server->vals->large_lock_type;
-	if (lock_is_write(flock)) {
+	if (flock->fl_type == F_WRLCK) {
 		cifs_dbg(FYI, "F_WRLCK\n");
 		*type |= server->vals->exclusive_lock_type;
 		*lock = 1;
-	} else if (lock_is_unlock(flock)) {
+	} else if (flock->fl_type == F_UNLCK) {
 		cifs_dbg(FYI, "F_UNLCK\n");
 		*type |= server->vals->unlock_lock_type;
 		*unlock = 1;
 		/* Check if unlock includes more than one lock range */
-	} else if (lock_is_read(flock)) {
+	} else if (flock->fl_type == F_RDLCK) {
 		cifs_dbg(FYI, "F_RDLCK\n");
 		*type |= server->vals->shared_lock_type;
 		*lock = 1;
-	} else if (flock->c.flc_type == F_EXLCK) {
+	} else if (flock->fl_type == F_EXLCK) {
 		cifs_dbg(FYI, "F_EXLCK\n");
 		*type |= server->vals->exclusive_lock_type;
 		*lock = 1;
-	} else if (flock->c.flc_type == F_SHLCK) {
+	} else if (flock->fl_type == F_SHLCK) {
 		cifs_dbg(FYI, "F_SHLCK\n");
 		*type |= server->vals->shared_lock_type;
 		*lock = 1;
@@ -1747,7 +1733,7 @@ cifs_getlk(struct file *file, struct file_lock *flock, __u32 type,
 		else
 			posix_lock_type = CIFS_WRLCK;
 		rc = CIFSSMBPosixLock(xid, tcon, netfid,
-				      hash_lockowner(flock->c.flc_owner),
+				      hash_lockowner(flock->fl_owner),
 				      flock->fl_start, length, flock,
 				      posix_lock_type, wait_flag);
 		return rc;
@@ -1764,7 +1750,7 @@ cifs_getlk(struct file *file, struct file_lock *flock, __u32 type,
 	if (rc == 0) {
 		rc = server->ops->mand_lock(xid, cfile, flock->fl_start, length,
 					    type, 0, 1, false);
-		flock->c.flc_type = F_UNLCK;
+		flock->fl_type = F_UNLCK;
 		if (rc != 0)
 			cifs_dbg(VFS, "Error unlocking previously locked range %d during test of lock\n",
 				 rc);
@@ -1772,7 +1758,7 @@ cifs_getlk(struct file *file, struct file_lock *flock, __u32 type,
 	}
 
 	if (type & server->vals->shared_lock_type) {
-		flock->c.flc_type = F_WRLCK;
+		flock->fl_type = F_WRLCK;
 		return 0;
 	}
 
@@ -1784,12 +1770,12 @@ cifs_getlk(struct file *file, struct file_lock *flock, __u32 type,
 	if (rc == 0) {
 		rc = server->ops->mand_lock(xid, cfile, flock->fl_start, length,
 			type | server->vals->shared_lock_type, 0, 1, false);
-		flock->c.flc_type = F_RDLCK;
+		flock->fl_type = F_RDLCK;
 		if (rc != 0)
 			cifs_dbg(VFS, "Error unlocking previously locked range %d during test of lock\n",
 				 rc);
 	} else
-		flock->c.flc_type = F_WRLCK;
+		flock->fl_type = F_WRLCK;
 
 	return 0;
 }
@@ -1957,7 +1943,7 @@ cifs_setlk(struct file *file, struct file_lock *flock, __u32 type,
 			posix_lock_type = CIFS_UNLCK;
 
 		rc = CIFSSMBPosixLock(xid, tcon, cfile->fid.netfid,
-				      hash_lockowner(flock->c.flc_owner),
+				      hash_lockowner(flock->fl_owner),
 				      flock->fl_start, length,
 				      NULL, posix_lock_type, wait_flag);
 		goto out;
@@ -1967,7 +1953,7 @@ cifs_setlk(struct file *file, struct file_lock *flock, __u32 type,
 		struct cifsLockInfo *lock;
 
 		lock = cifs_lock_init(flock->fl_start, length, type,
-				      flock->c.flc_flags);
+				      flock->fl_flags);
 		if (!lock)
 			return -ENOMEM;
 
@@ -2006,7 +1992,7 @@ cifs_setlk(struct file *file, struct file_lock *flock, __u32 type,
 		rc = server->ops->mand_unlock_range(cfile, flock, xid);
 
 out:
-	if ((flock->c.flc_flags & FL_POSIX) || (flock->c.flc_flags & FL_FLOCK)) {
+	if ((flock->fl_flags & FL_POSIX) || (flock->fl_flags & FL_FLOCK)) {
 		/*
 		 * If this is a request to remove all locks because we
 		 * are closing the file, it doesn't matter if the
@@ -2015,7 +2001,7 @@ out:
 		 */
 		if (rc) {
 			cifs_dbg(VFS, "%s failed rc=%d\n", __func__, rc);
-			if (!(flock->c.flc_flags & FL_CLOSE))
+			if (!(flock->fl_flags & FL_CLOSE))
 				return rc;
 		}
 		rc = locks_lock_file_wait(file, flock);
@@ -2036,7 +2022,7 @@ int cifs_flock(struct file *file, int cmd, struct file_lock *fl)
 
 	xid = get_xid();
 
-	if (!(fl->c.flc_flags & FL_FLOCK)) {
+	if (!(fl->fl_flags & FL_FLOCK)) {
 		rc = -ENOLCK;
 		free_xid(xid);
 		return rc;
@@ -2087,8 +2073,7 @@ int cifs_lock(struct file *file, int cmd, struct file_lock *flock)
 	xid = get_xid();
 
 	cifs_dbg(FYI, "%s: %pD2 cmd=0x%x type=0x%x flags=0x%x r=%lld:%lld\n", __func__, file, cmd,
-		 flock->c.flc_flags, flock->c.flc_type,
-		 (long long)flock->fl_start,
+		 flock->fl_flags, flock->fl_type, (long long)flock->fl_start,
 		 (long long)flock->fl_end);
 
 	cfile = (struct cifsFileInfo *)file->private_data;
@@ -2639,20 +2624,20 @@ static int cifs_partialpagewrite(struct page *page, unsigned from, unsigned to)
  * dirty pages if possible, but don't sleep while doing so.
  */
 static void cifs_extend_writeback(struct address_space *mapping,
-				  struct xa_state *xas,
 				  long *_count,
 				  loff_t start,
 				  int max_pages,
-				  loff_t max_len,
-				  size_t *_len)
+				  size_t max_len,
+				  unsigned int *_len)
 {
 	struct folio_batch batch;
 	struct folio *folio;
-	unsigned int nr_pages;
-	pgoff_t index = (start + *_len) / PAGE_SIZE;
-	size_t len;
+	unsigned int psize, nr_pages;
+	size_t len = *_len;
+	pgoff_t index = (start + len) / PAGE_SIZE;
 	bool stop = true;
 	unsigned int i;
+	XA_STATE(xas, &mapping->i_pages, index);
 
 	folio_batch_init(&batch);
 
@@ -2663,64 +2648,54 @@ static void cifs_extend_writeback(struct address_space *mapping,
 		 */
 		rcu_read_lock();
 
-		xas_for_each(xas, folio, ULONG_MAX) {
+		xas_for_each(&xas, folio, ULONG_MAX) {
 			stop = true;
-			if (xas_retry(xas, folio))
+			if (xas_retry(&xas, folio))
 				continue;
 			if (xa_is_value(folio))
 				break;
-			if (folio->index != index) {
-				xas_reset(xas);
+			if (folio->index != index)
 				break;
-			}
-
 			if (!folio_try_get_rcu(folio)) {
-				xas_reset(xas);
+				xas_reset(&xas);
 				continue;
 			}
 			nr_pages = folio_nr_pages(folio);
-			if (nr_pages > max_pages) {
-				xas_reset(xas);
+			if (nr_pages > max_pages)
 				break;
-			}
 
 			/* Has the page moved or been split? */
-			if (unlikely(folio != xas_reload(xas))) {
+			if (unlikely(folio != xas_reload(&xas))) {
 				folio_put(folio);
-				xas_reset(xas);
 				break;
 			}
 
 			if (!folio_trylock(folio)) {
 				folio_put(folio);
-				xas_reset(xas);
 				break;
 			}
-			if (!folio_test_dirty(folio) ||
-			    folio_test_writeback(folio)) {
+			if (!folio_test_dirty(folio) || folio_test_writeback(folio)) {
 				folio_unlock(folio);
 				folio_put(folio);
-				xas_reset(xas);
 				break;
 			}
 
 			max_pages -= nr_pages;
-			len = folio_size(folio);
+			psize = folio_size(folio);
+			len += psize;
 			stop = false;
-
-			index += nr_pages;
-			*_count -= nr_pages;
-			*_len += len;
-			if (max_pages <= 0 || *_len >= max_len || *_count <= 0)
+			if (max_pages <= 0 || len >= max_len || *_count <= 0)
 				stop = true;
 
+			index += nr_pages;
 			if (!folio_batch_add(&batch, folio))
 				break;
 			if (stop)
 				break;
 		}
 
-		xas_pause(xas);
+		if (!stop)
+			xas_pause(&xas);
 		rcu_read_unlock();
 
 		/* Now, if we obtained any pages, we can shift them to being
@@ -2737,12 +2712,16 @@ static void cifs_extend_writeback(struct address_space *mapping,
 			if (!folio_clear_dirty_for_io(folio))
 				WARN_ON(1);
 			folio_start_writeback(folio);
+
+			*_count -= folio_nr_pages(folio);
 			folio_unlock(folio);
 		}
 
 		folio_batch_release(&batch);
 		cond_resched();
 	} while (!stop);
+
+	*_len = len;
 }
 
 /*
@@ -2750,10 +2729,8 @@ static void cifs_extend_writeback(struct address_space *mapping,
  */
 static ssize_t cifs_write_back_from_locked_folio(struct address_space *mapping,
 						 struct writeback_control *wbc,
-						 struct xa_state *xas,
 						 struct folio *folio,
-						 unsigned long long start,
-						 unsigned long long end)
+						 loff_t start, loff_t end)
 {
 	struct inode *inode = mapping->host;
 	struct TCP_Server_Info *server;
@@ -2762,18 +2739,17 @@ static ssize_t cifs_write_back_from_locked_folio(struct address_space *mapping,
 	struct cifs_credits credits_on_stack;
 	struct cifs_credits *credits = &credits_on_stack;
 	struct cifsFileInfo *cfile = NULL;
-	unsigned long long i_size = i_size_read(inode), max_len;
-	unsigned int xid, wsize;
-	size_t len = folio_size(folio);
+	unsigned int xid, wsize, len;
+	loff_t i_size = i_size_read(inode);
+	size_t max_len;
 	long count = wbc->nr_to_write;
 	int rc;
 
 	/* The folio should be locked, dirty and not undergoing writeback. */
-	if (!folio_clear_dirty_for_io(folio))
-		WARN_ON_ONCE(1);
 	folio_start_writeback(folio);
 
 	count -= folio_nr_pages(folio);
+	len = folio_size(folio);
 
 	xid = get_xid();
 	server = cifs_pick_channel(cifs_sb_master_tcon(cifs_sb)->ses);
@@ -2803,10 +2779,9 @@ static ssize_t cifs_write_back_from_locked_folio(struct address_space *mapping,
 	wdata->server = server;
 	cfile = NULL;
 
-	/* Find all consecutive lockable dirty pages that have contiguous
-	 * written regions, stopping when we find a page that is not
-	 * immediately lockable, is not dirty or is missing, or we reach the
-	 * end of the range.
+	/* Find all consecutive lockable dirty pages, stopping when we find a
+	 * page that is not immediately lockable, is not dirty or is missing,
+	 * or we reach the end of the range.
 	 */
 	if (start < i_size) {
 		/* Trim the write to the EOF; the extra data is ignored.  Also
@@ -2826,18 +2801,19 @@ static ssize_t cifs_write_back_from_locked_folio(struct address_space *mapping,
 			max_pages -= folio_nr_pages(folio);
 
 			if (max_pages > 0)
-				cifs_extend_writeback(mapping, xas, &count, start,
+				cifs_extend_writeback(mapping, &count, start,
 						      max_pages, max_len, &len);
 		}
+		len = min_t(loff_t, len, max_len);
 	}
-	len = min_t(unsigned long long, len, i_size - start);
+
+	wdata->bytes = len;
 
 	/* We now have a contiguous set of dirty pages, each with writeback
 	 * set; the first page is still locked at this point, but all the rest
 	 * have been unlocked.
 	 */
 	folio_unlock(folio);
-	wdata->bytes = len;
 
 	if (start < i_size) {
 		iov_iter_xarray(&wdata->iter, ITER_SOURCE, &mapping->i_pages,
@@ -2888,118 +2864,102 @@ err_xid:
 /*
  * write a region of pages back to the server
  */
-static ssize_t cifs_writepages_begin(struct address_space *mapping,
-				     struct writeback_control *wbc,
-				     struct xa_state *xas,
-				     unsigned long long *_start,
-				     unsigned long long end)
-{
-	struct folio *folio;
-	unsigned long long start = *_start;
-	ssize_t ret;
-	int skips = 0;
-
-search_again:
-	/* Find the first dirty page. */
-	rcu_read_lock();
-
-	for (;;) {
-		folio = xas_find_marked(xas, end / PAGE_SIZE, PAGECACHE_TAG_DIRTY);
-		if (xas_retry(xas, folio) || xa_is_value(folio))
-			continue;
-		if (!folio)
-			break;
-
-		if (!folio_try_get_rcu(folio)) {
-			xas_reset(xas);
-			continue;
-		}
-
-		if (unlikely(folio != xas_reload(xas))) {
-			folio_put(folio);
-			xas_reset(xas);
-			continue;
-		}
-
-		xas_pause(xas);
-		break;
-	}
-	rcu_read_unlock();
-	if (!folio)
-		return 0;
-
-	start = folio_pos(folio); /* May regress with THPs */
-
-	/* At this point we hold neither the i_pages lock nor the page lock:
-	 * the page may be truncated or invalidated (changing page->mapping to
-	 * NULL), or even swizzled back from swapper_space to tmpfs file
-	 * mapping
-	 */
-lock_again:
-	if (wbc->sync_mode != WB_SYNC_NONE) {
-		ret = folio_lock_killable(folio);
-		if (ret < 0)
-			return ret;
-	} else {
-		if (!folio_trylock(folio))
-			goto search_again;
-	}
-
-	if (folio->mapping != mapping ||
-	    !folio_test_dirty(folio)) {
-		start += folio_size(folio);
-		folio_unlock(folio);
-		goto search_again;
-	}
-
-	if (folio_test_writeback(folio) ||
-	    folio_test_fscache(folio)) {
-		folio_unlock(folio);
-		if (wbc->sync_mode != WB_SYNC_NONE) {
-			folio_wait_writeback(folio);
-#ifdef CONFIG_CIFS_FSCACHE
-			folio_wait_fscache(folio);
-#endif
-			goto lock_again;
-		}
-
-		start += folio_size(folio);
-		if (wbc->sync_mode == WB_SYNC_NONE) {
-			if (skips >= 5 || need_resched()) {
-				ret = 0;
-				goto out;
-			}
-			skips++;
-		}
-		goto search_again;
-	}
-
-	ret = cifs_write_back_from_locked_folio(mapping, wbc, xas, folio, start, end);
-out:
-	if (ret > 0)
-		*_start = start + ret;
-	return ret;
-}
-
-/*
- * Write a region of pages back to the server
- */
 static int cifs_writepages_region(struct address_space *mapping,
 				  struct writeback_control *wbc,
-				  unsigned long long *_start,
-				  unsigned long long end)
+				  loff_t start, loff_t end, loff_t *_next)
 {
-	ssize_t ret;
+	struct folio_batch fbatch;
+	int skips = 0;
 
-	XA_STATE(xas, &mapping->i_pages, *_start / PAGE_SIZE);
-
+	folio_batch_init(&fbatch);
 	do {
-		ret = cifs_writepages_begin(mapping, wbc, &xas, _start, end);
-		if (ret > 0 && wbc->nr_to_write > 0)
-			cond_resched();
-	} while (ret > 0 && wbc->nr_to_write > 0);
+		int nr;
+		pgoff_t index = start / PAGE_SIZE;
 
-	return ret > 0 ? 0 : ret;
+		nr = filemap_get_folios_tag(mapping, &index, end / PAGE_SIZE,
+					    PAGECACHE_TAG_DIRTY, &fbatch);
+		if (!nr)
+			break;
+
+		for (int i = 0; i < nr; i++) {
+			ssize_t ret;
+			struct folio *folio = fbatch.folios[i];
+
+redo_folio:
+			start = folio_pos(folio); /* May regress with THPs */
+
+			/* At this point we hold neither the i_pages lock nor the
+			 * page lock: the page may be truncated or invalidated
+			 * (changing page->mapping to NULL), or even swizzled
+			 * back from swapper_space to tmpfs file mapping
+			 */
+			if (wbc->sync_mode != WB_SYNC_NONE) {
+				ret = folio_lock_killable(folio);
+				if (ret < 0)
+					goto write_error;
+			} else {
+				if (!folio_trylock(folio))
+					goto skip_write;
+			}
+
+			if (folio->mapping != mapping ||
+			    !folio_test_dirty(folio)) {
+				start += folio_size(folio);
+				folio_unlock(folio);
+				continue;
+			}
+
+			if (folio_test_writeback(folio) ||
+			    folio_test_fscache(folio)) {
+				folio_unlock(folio);
+				if (wbc->sync_mode == WB_SYNC_NONE)
+					goto skip_write;
+
+				folio_wait_writeback(folio);
+#ifdef CONFIG_CIFS_FSCACHE
+				folio_wait_fscache(folio);
+#endif
+				goto redo_folio;
+			}
+
+			if (!folio_clear_dirty_for_io(folio))
+				/* We hold the page lock - it should've been dirty. */
+				WARN_ON(1);
+
+			ret = cifs_write_back_from_locked_folio(mapping, wbc, folio, start, end);
+			if (ret < 0)
+				goto write_error;
+
+			start += ret;
+			continue;
+
+write_error:
+			folio_batch_release(&fbatch);
+			*_next = start;
+			return ret;
+
+skip_write:
+			/*
+			 * Too many skipped writes, or need to reschedule?
+			 * Treat it as a write error without an error code.
+			 */
+			if (skips >= 5 || need_resched()) {
+				ret = 0;
+				goto write_error;
+			}
+
+			/* Otherwise, just skip that folio and go on to the next */
+			skips++;
+			start += folio_size(folio);
+			continue;
+		}
+
+		folio_batch_release(&fbatch);		
+		cond_resched();
+	} while (wbc->nr_to_write > 0);
+
+	*_next = start;
+	return 0;
 }
 
 /*
@@ -3008,7 +2968,7 @@ static int cifs_writepages_region(struct address_space *mapping,
 static int cifs_writepages(struct address_space *mapping,
 			   struct writeback_control *wbc)
 {
-	loff_t start, end;
+	loff_t start, next;
 	int ret;
 
 	/* We have to be careful as we can end up racing with setattr()
@@ -3016,34 +2976,28 @@ static int cifs_writepages(struct address_space *mapping,
 	 * to prevent it.
 	 */
 
-	if (wbc->range_cyclic && mapping->writeback_index) {
+	if (wbc->range_cyclic) {
 		start = mapping->writeback_index * PAGE_SIZE;
-		ret = cifs_writepages_region(mapping, wbc, &start, LLONG_MAX);
-		if (ret < 0)
-			goto out;
-
-		if (wbc->nr_to_write <= 0) {
-			mapping->writeback_index = start / PAGE_SIZE;
-			goto out;
+		ret = cifs_writepages_region(mapping, wbc, start, LLONG_MAX, &next);
+		if (ret == 0) {
+			mapping->writeback_index = next / PAGE_SIZE;
+			if (start > 0 && wbc->nr_to_write > 0) {
+				ret = cifs_writepages_region(mapping, wbc, 0,
+							     start, &next);
+				if (ret == 0)
+					mapping->writeback_index =
+						next / PAGE_SIZE;
+			}
 		}
-
-		start = 0;
-		end = mapping->writeback_index * PAGE_SIZE;
-		mapping->writeback_index = 0;
-		ret = cifs_writepages_region(mapping, wbc, &start, end);
-		if (ret == 0)
-			mapping->writeback_index = start / PAGE_SIZE;
 	} else if (wbc->range_start == 0 && wbc->range_end == LLONG_MAX) {
-		start = 0;
-		ret = cifs_writepages_region(mapping, wbc, &start, LLONG_MAX);
+		ret = cifs_writepages_region(mapping, wbc, 0, LLONG_MAX, &next);
 		if (wbc->nr_to_write > 0 && ret == 0)
-			mapping->writeback_index = start / PAGE_SIZE;
+			mapping->writeback_index = next / PAGE_SIZE;
 	} else {
-		start = wbc->range_start;
-		ret = cifs_writepages_region(mapping, wbc, &start, wbc->range_end);
+		ret = cifs_writepages_region(mapping, wbc,
+					     wbc->range_start, wbc->range_end, &next);
 	}
 
-out:
 	return ret;
 }
 
@@ -3140,15 +3094,8 @@ static int cifs_write_end(struct file *file, struct address_space *mapping,
 	if (rc > 0) {
 		spin_lock(&inode->i_lock);
 		if (pos > inode->i_size) {
-			loff_t additional_blocks = (512 - 1 + copied) >> 9;
-
 			i_size_write(inode, pos);
-			/*
-			 * Estimate new allocation size based on the amount written.
-			 * This will be updated from server on close (and on queryinfo)
-			 */
-			inode->i_blocks = min_t(blkcnt_t, (512 - 1 + pos) >> 9,
-						inode->i_blocks + additional_blocks);
+			inode->i_blocks = (512 - 1 + pos) >> 9;
 		}
 		spin_unlock(&inode->i_lock);
 	}
@@ -4791,14 +4738,12 @@ static int is_inode_writable(struct cifsInodeInfo *cifs_inode)
    refreshing the inode only on increases in the file size
    but this is tricky to do without racing with writebehind
    page caching in the current Linux kernel design */
-bool is_size_safe_to_change(struct cifsInodeInfo *cifsInode, __u64 end_of_file,
-			    bool from_readdir)
+bool is_size_safe_to_change(struct cifsInodeInfo *cifsInode, __u64 end_of_file)
 {
 	if (!cifsInode)
 		return true;
 
-	if (is_inode_writable(cifsInode) ||
-		((cifsInode->oplock & CIFS_CACHE_RW_FLG) != 0 && from_readdir)) {
+	if (is_inode_writable(cifsInode)) {
 		/* This inode is open for write at least once */
 		struct cifs_sb_info *cifs_sb;
 

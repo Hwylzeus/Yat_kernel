@@ -88,8 +88,7 @@ DECLARE_EVENT_CLASS(tcp_event_sk_skb,
 			      sk->sk_v6_rcv_saddr, sk->sk_v6_daddr);
 	),
 
-	TP_printk("skbaddr=%p skaddr=%p family=%s sport=%hu dport=%hu saddr=%pI4 daddr=%pI4 saddrv6=%pI6c daddrv6=%pI6c state=%s",
-		  __entry->skbaddr, __entry->skaddr,
+	TP_printk("family=%s sport=%hu dport=%hu saddr=%pI4 daddr=%pI4 saddrv6=%pI6c daddrv6=%pI6c state=%s",
 		  show_family_name(__entry->family),
 		  __entry->sport, __entry->dport, __entry->saddr, __entry->daddr,
 		  __entry->saddr_v6, __entry->daddr_v6,
@@ -259,8 +258,6 @@ TRACE_EVENT(tcp_probe,
 		__field(__u32, srtt)
 		__field(__u32, rcv_wnd)
 		__field(__u64, sock_cookie)
-		__field(const void *, skbaddr)
-		__field(const void *, skaddr)
 	),
 
 	TP_fast_assign(
@@ -288,18 +285,14 @@ TRACE_EVENT(tcp_probe,
 		__entry->ssthresh = tcp_current_ssthresh(sk);
 		__entry->srtt = tp->srtt_us >> 3;
 		__entry->sock_cookie = sock_gen_cookie(sk);
-
-		__entry->skbaddr = skb;
-		__entry->skaddr = sk;
 	),
 
-	TP_printk("family=%s src=%pISpc dest=%pISpc mark=%#x data_len=%d snd_nxt=%#x snd_una=%#x snd_cwnd=%u ssthresh=%u snd_wnd=%u srtt=%u rcv_wnd=%u sock_cookie=%llx skbaddr=%p skaddr=%p",
+	TP_printk("family=%s src=%pISpc dest=%pISpc mark=%#x data_len=%d snd_nxt=%#x snd_una=%#x snd_cwnd=%u ssthresh=%u snd_wnd=%u srtt=%u rcv_wnd=%u sock_cookie=%llx",
 		  show_family_name(__entry->family),
 		  __entry->saddr, __entry->daddr, __entry->mark,
 		  __entry->data_len, __entry->snd_nxt, __entry->snd_una,
 		  __entry->snd_cwnd, __entry->ssthresh, __entry->snd_wnd,
-		  __entry->srtt, __entry->rcv_wnd, __entry->sock_cookie,
-		  __entry->skbaddr, __entry->skaddr)
+		  __entry->srtt, __entry->rcv_wnd, __entry->sock_cookie)
 );
 
 #define TP_STORE_ADDR_PORTS_SKB_V4(__entry, skb)			\
@@ -368,8 +361,7 @@ DECLARE_EVENT_CLASS(tcp_event_skb,
 		TP_STORE_ADDR_PORTS_SKB(__entry, skb);
 	),
 
-	TP_printk("skbaddr=%p src=%pISpc dest=%pISpc",
-		  __entry->skbaddr, __entry->saddr, __entry->daddr)
+	TP_printk("src=%pISpc dest=%pISpc", __entry->saddr, __entry->daddr)
 );
 
 DEFINE_EVENT(tcp_event_skb, tcp_bad_csum,

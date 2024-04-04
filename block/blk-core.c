@@ -394,34 +394,24 @@ static void blk_timeout_work(struct work_struct *work)
 {
 }
 
-struct request_queue *blk_alloc_queue(struct queue_limits *lim, int node_id)
+struct request_queue *blk_alloc_queue(int node_id)
 {
 	struct request_queue *q;
-	int error;
 
 	q = kmem_cache_alloc_node(blk_requestq_cachep, GFP_KERNEL | __GFP_ZERO,
 				  node_id);
 	if (!q)
-		return ERR_PTR(-ENOMEM);
+		return NULL;
 
 	q->last_merge = NULL;
 
 	q->id = ida_alloc(&blk_queue_ida, GFP_KERNEL);
-	if (q->id < 0) {
-		error = q->id;
+	if (q->id < 0)
 		goto fail_q;
-	}
 
 	q->stats = blk_alloc_queue_stats();
-	if (!q->stats) {
-		error = -ENOMEM;
+	if (!q->stats)
 		goto fail_id;
-	}
-
-	error = blk_set_default_limits(lim);
-	if (error)
-		goto fail_stats;
-	q->limits = *lim;
 
 	q->node = node_id;
 
@@ -435,7 +425,6 @@ struct request_queue *blk_alloc_queue(struct queue_limits *lim, int node_id)
 	mutex_init(&q->debugfs_mutex);
 	mutex_init(&q->sysfs_lock);
 	mutex_init(&q->sysfs_dir_lock);
-	mutex_init(&q->limits_lock);
 	mutex_init(&q->rq_qos_mutex);
 	spin_lock_init(&q->queue_lock);
 
@@ -446,12 +435,12 @@ struct request_queue *blk_alloc_queue(struct queue_limits *lim, int node_id)
 	 * Init percpu_ref in atomic mode so that it's faster to shutdown.
 	 * See blk_register_queue() for details.
 	 */
-	error = percpu_ref_init(&q->q_usage_counter,
+	if (percpu_ref_init(&q->q_usage_counter,
 				blk_queue_usage_counter_release,
-				PERCPU_REF_INIT_ATOMIC, GFP_KERNEL);
-	if (error)
+				PERCPU_REF_INIT_ATOMIC, GFP_KERNEL))
 		goto fail_stats;
 
+	blk_set_default_limits(&q->limits);
 	q->nr_requests = BLKDEV_DEFAULT_RQ;
 
 	return q;
@@ -462,7 +451,7 @@ fail_id:
 	ida_free(&blk_queue_ida, q->id);
 fail_q:
 	kmem_cache_free(blk_requestq_cachep, q);
-	return ERR_PTR(error);
+	return NULL;
 }
 
 /**
@@ -1094,7 +1083,6 @@ void blk_start_plug_nr_ios(struct blk_plug *plug, unsigned short nr_ios)
 	if (tsk->plug)
 		return;
 
-	plug->cur_ktime = 0;
 	plug->mq_list = NULL;
 	plug->cached_rq = NULL;
 	plug->nr_ios = min_t(unsigned short, nr_ios, BLK_MAX_REQUEST_COUNT);
@@ -1194,8 +1182,6 @@ void __blk_flush_plug(struct blk_plug *plug, bool from_schedule)
 	 */
 	if (unlikely(!rq_list_empty(plug->cached_rq)))
 		blk_mq_free_plug_rqs(plug);
-
-	current->flags &= ~PF_BLOCK_TS;
 }
 
 /**
@@ -1243,7 +1229,8 @@ int __init blk_dev_init(void)
 	if (!kblockd_workqueue)
 		panic("Failed to create kblockd\n");
 
-	blk_requestq_cachep = KMEM_CACHE(request_queue, SLAB_PANIC);
+	blk_requestq_cachep = kmem_cache_create("request_queue",
+			sizeof(struct request_queue), 0, SLAB_PANIC, NULL);
 
 	blk_debugfs_root = debugfs_create_dir("block", NULL);
 

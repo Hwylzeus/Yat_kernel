@@ -91,29 +91,23 @@ static int bch2_snapshot_tree_create(struct btree_trans *trans,
 
 /* Snapshot nodes: */
 
-static bool __bch2_snapshot_is_ancestor_early(struct snapshot_table *t, u32 id, u32 ancestor)
-{
-	while (id && id < ancestor) {
-		const struct snapshot_t *s = __snapshot_t(t, id);
-		id = s ? s->parent : 0;
-	}
-	return id == ancestor;
-}
-
 static bool bch2_snapshot_is_ancestor_early(struct bch_fs *c, u32 id, u32 ancestor)
 {
+	struct snapshot_table *t;
+
 	rcu_read_lock();
-	bool ret = __bch2_snapshot_is_ancestor_early(rcu_dereference(c->snapshots), id, ancestor);
+	t = rcu_dereference(c->snapshots);
+
+	while (id && id < ancestor)
+		id = __snapshot_t(t, id)->parent;
 	rcu_read_unlock();
 
-	return ret;
+	return id == ancestor;
 }
 
 static inline u32 get_ancestor_below(struct snapshot_table *t, u32 id, u32 ancestor)
 {
 	const struct snapshot_t *s = __snapshot_t(t, id);
-	if (!s)
-		return 0;
 
 	if (s->skip[2] <= ancestor)
 		return s->skip[2];
@@ -126,15 +120,13 @@ static inline u32 get_ancestor_below(struct snapshot_table *t, u32 id, u32 ances
 
 bool __bch2_snapshot_is_ancestor(struct bch_fs *c, u32 id, u32 ancestor)
 {
+	struct snapshot_table *t;
 	bool ret;
 
-	rcu_read_lock();
-	struct snapshot_table *t = rcu_dereference(c->snapshots);
+	EBUG_ON(c->recovery_pass_done <= BCH_RECOVERY_PASS_check_snapshots);
 
-	if (unlikely(c->recovery_pass_done < BCH_RECOVERY_PASS_check_snapshots)) {
-		ret = __bch2_snapshot_is_ancestor_early(t, id, ancestor);
-		goto out;
-	}
+	rcu_read_lock();
+	t = rcu_dereference(c->snapshots);
 
 	while (id && id < ancestor - IS_ANCESTOR_BITMAP)
 		id = get_ancestor_below(t, id, ancestor);
@@ -142,11 +134,11 @@ bool __bch2_snapshot_is_ancestor(struct bch_fs *c, u32 id, u32 ancestor)
 	if (id && id < ancestor) {
 		ret = test_bit(ancestor - id - 1, __snapshot_t(t, id)->is_ancestor);
 
-		EBUG_ON(ret != __bch2_snapshot_is_ancestor_early(t, id, ancestor));
+		EBUG_ON(ret != bch2_snapshot_is_ancestor_early(c, id, ancestor));
 	} else {
 		ret = id == ancestor;
 	}
-out:
+
 	rcu_read_unlock();
 
 	return ret;
@@ -155,39 +147,36 @@ out:
 static noinline struct snapshot_t *__snapshot_t_mut(struct bch_fs *c, u32 id)
 {
 	size_t idx = U32_MAX - id;
+	size_t new_size;
 	struct snapshot_table *new, *old;
 
-	size_t new_bytes = kmalloc_size_roundup(struct_size(new, s, idx + 1));
-	size_t new_size = (new_bytes - sizeof(*new)) / sizeof(new->s[0]);
+	new_size = max(16UL, roundup_pow_of_two(idx + 1));
 
-	new = kvzalloc(new_bytes, GFP_KERNEL);
+	new = kvzalloc(struct_size(new, s, new_size), GFP_KERNEL);
 	if (!new)
 		return NULL;
 
-	new->nr = new_size;
-
 	old = rcu_dereference_protected(c->snapshots, true);
 	if (old)
-		memcpy(new->s, old->s, sizeof(old->s[0]) * old->nr);
+		memcpy(new->s,
+		       rcu_dereference_protected(c->snapshots, true)->s,
+		       sizeof(new->s[0]) * c->snapshot_table_size);
 
 	rcu_assign_pointer(c->snapshots, new);
-	kvfree_rcu(old, rcu);
+	c->snapshot_table_size = new_size;
+	kvfree_rcu_mightsleep(old);
 
-	return &rcu_dereference_protected(c->snapshots,
-				lockdep_is_held(&c->snapshot_table_lock))->s[idx];
+	return &rcu_dereference_protected(c->snapshots, true)->s[idx];
 }
 
 static inline struct snapshot_t *snapshot_t_mut(struct bch_fs *c, u32 id)
 {
 	size_t idx = U32_MAX - id;
-	struct snapshot_table *table =
-		rcu_dereference_protected(c->snapshots,
-				lockdep_is_held(&c->snapshot_table_lock));
 
 	lockdep_assert_held(&c->snapshot_table_lock);
 
-	if (likely(table && idx < table->nr))
-		return &table->s[idx];
+	if (likely(idx < c->snapshot_table_size))
+		return &rcu_dereference_protected(c->snapshots, true)->s[idx];
 
 	return __snapshot_t_mut(c, id);
 }
@@ -558,7 +547,7 @@ static int check_snapshot_tree(struct btree_trans *trans,
 			"snapshot tree points to missing subvolume:\n  %s",
 			(printbuf_reset(&buf),
 			 bch2_bkey_val_to_text(&buf, c, st.s_c), buf.buf)) ||
-	    fsck_err_on(!bch2_snapshot_is_ancestor(c,
+	    fsck_err_on(!bch2_snapshot_is_ancestor_early(c,
 						le32_to_cpu(subvol.snapshot),
 						root_id),
 			c, snapshot_tree_to_wrong_subvol,

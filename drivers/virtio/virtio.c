@@ -353,7 +353,7 @@ static void virtio_dev_remove(struct device *_d)
 	of_node_put(dev->dev.of_node);
 }
 
-static const struct bus_type virtio_bus = {
+static struct bus_type virtio_bus = {
 	.name  = "virtio",
 	.match = virtio_dev_match,
 	.dev_groups = virtio_dev_groups,
@@ -510,10 +510,8 @@ int virtio_device_freeze(struct virtio_device *dev)
 
 	if (drv && drv->freeze) {
 		ret = drv->freeze(dev);
-		if (ret) {
-			virtio_config_enable(dev);
+		if (ret)
 			return ret;
-		}
 	}
 
 	if (dev->config->destroy_avq)

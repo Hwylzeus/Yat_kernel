@@ -195,7 +195,7 @@ static const char * const level_options[] = {
 	[TLMI_LEVEL_MASTER] = "master",
 };
 static struct think_lmi tlmi_priv;
-static const struct class *fw_attr_class;
+static struct class *fw_attr_class;
 static DEFINE_MUTEX(tlmi_mutex);
 
 /* Convert BIOS WMI error string to suitable error code */

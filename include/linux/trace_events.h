@@ -17,9 +17,6 @@ struct dentry;
 struct bpf_prog;
 union bpf_attr;
 
-/* Used for event string fields when they are NULL */
-#define EVENT_NULL_STR		"(null)"
-
 const char *trace_print_flags_seq(struct trace_seq *p, const char *delim,
 				  unsigned long flags,
 				  const struct trace_print_flags *flag_array);
@@ -106,15 +103,12 @@ struct trace_iterator {
 	unsigned int		temp_size;
 	char			*fmt;	/* modified format holder */
 	unsigned int		fmt_size;
-	atomic_t		wait_index;
+	long			wait_index;
 
 	/* trace_seq for __print_flags() and __print_symbolic() etc. */
 	struct trace_seq	tmp_seq;
 
 	cpumask_var_t		started;
-
-	/* Set when the file is closed to prevent new waiters */
-	bool			closed;
 
 	/* it's true when current open file is snapshot */
 	bool			snapshot;

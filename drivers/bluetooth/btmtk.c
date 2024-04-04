@@ -372,10 +372,8 @@ int btmtk_process_coredump(struct hci_dev *hdev, struct sk_buff *skb)
 	struct btmediatek_data *data = hci_get_priv(hdev);
 	int err;
 
-	if (!IS_ENABLED(CONFIG_DEV_COREDUMP)) {
-		kfree_skb(skb);
+	if (!IS_ENABLED(CONFIG_DEV_COREDUMP))
 		return 0;
-	}
 
 	switch (data->cd_info.state) {
 	case HCI_DEVCOREDUMP_IDLE:
@@ -422,6 +420,5 @@ MODULE_LICENSE("GPL");
 MODULE_FIRMWARE(FIRMWARE_MT7622);
 MODULE_FIRMWARE(FIRMWARE_MT7663);
 MODULE_FIRMWARE(FIRMWARE_MT7668);
-MODULE_FIRMWARE(FIRMWARE_MT7922);
 MODULE_FIRMWARE(FIRMWARE_MT7961);
 MODULE_FIRMWARE(FIRMWARE_MT7925);

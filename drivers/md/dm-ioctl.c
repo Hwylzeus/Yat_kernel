@@ -25,7 +25,7 @@
 #include <linux/ima.h>
 
 #define DM_MSG_PREFIX "ioctl"
-#define DM_DRIVER_EMAIL "dm-devel@lists.linux.dev"
+#define DM_DRIVER_EMAIL "dm-devel@redhat.com"
 
 struct dm_file {
 	/*

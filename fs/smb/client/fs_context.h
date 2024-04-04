@@ -41,13 +41,6 @@ enum {
 	Opt_cache_err
 };
 
-enum cifs_reparse_parm {
-	Opt_reparse_default,
-	Opt_reparse_nfs,
-	Opt_reparse_wsl,
-	Opt_reparse_err
-};
-
 enum cifs_sec_param {
 	Opt_sec_krb5,
 	Opt_sec_krb5i,
@@ -155,7 +148,6 @@ enum cifs_param {
 	Opt_vers,
 	Opt_sec,
 	Opt_cache,
-	Opt_reparse,
 
 	/* Mount options to be ignored */
 	Opt_ignore,
@@ -273,13 +265,12 @@ struct smb3_fs_context {
 	unsigned int max_credits; /* smb3 max_credits 10 < credits < 60000 */
 	unsigned int max_channels;
 	unsigned int max_cached_dirs;
-	bool compress; /* enable SMB2 messages (READ/WRITE) de/compression */
+	__u16 compression; /* compression algorithm 0xFFFF default 0=disabled */
 	bool rootfs:1; /* if it's a SMB root file system */
 	bool witness:1; /* use witness protocol */
 	char *leaf_fullpath;
 	struct cifs_ses *dfs_root_ses;
 	bool dfs_automount:1; /* set for dfs automount only */
-	enum cifs_reparse_type reparse_type;
 };
 
 extern const struct fs_parameter_spec smb3_fs_parameters[];

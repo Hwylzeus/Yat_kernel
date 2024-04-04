@@ -141,10 +141,6 @@
 	status = "okay";
 };
 
-&combphy2_psu {
-	status = "okay";
-};
-
 &cpu_l0 {
 	cpu-supply = <&vdd_cpu_lit_s0>;
 };
@@ -844,9 +840,5 @@
 };
 
 &usb_host1_ohci {
-	status = "okay";
-};
-
-&usb_host2_xhci {
 	status = "okay";
 };

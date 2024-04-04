@@ -316,22 +316,6 @@ static int pdsc_identify(struct pdsc *pdsc)
 	return 0;
 }
 
-void pdsc_dev_uninit(struct pdsc *pdsc)
-{
-	if (pdsc->intr_info) {
-		int i;
-
-		for (i = 0; i < pdsc->nintrs; i++)
-			pdsc_intr_free(pdsc, i);
-
-		kfree(pdsc->intr_info);
-		pdsc->intr_info = NULL;
-		pdsc->nintrs = 0;
-	}
-
-	pci_free_irq_vectors(pdsc->pdev);
-}
-
 int pdsc_dev_init(struct pdsc *pdsc)
 {
 	unsigned int nintrs;
@@ -357,8 +341,10 @@ int pdsc_dev_init(struct pdsc *pdsc)
 
 	/* Get intr_info struct array for tracking */
 	pdsc->intr_info = kcalloc(nintrs, sizeof(*pdsc->intr_info), GFP_KERNEL);
-	if (!pdsc->intr_info)
-		return -ENOMEM;
+	if (!pdsc->intr_info) {
+		err = -ENOMEM;
+		goto err_out;
+	}
 
 	err = pci_alloc_irq_vectors(pdsc->pdev, nintrs, nintrs, PCI_IRQ_MSIX);
 	if (err != nintrs) {

@@ -52,6 +52,9 @@
 #include "fs_context.h"
 #include "cifs_swn.h"
 
+extern mempool_t *cifs_req_poolp;
+extern bool disable_legacy_dialects;
+
 /* FIXME: should these be tunable? */
 #define TLINK_ERROR_EXPIRE	(1 * HZ)
 #define TLINK_IDLE_EXPIRE	(600 * HZ)
@@ -120,16 +123,12 @@ static void smb2_query_server_interfaces(struct work_struct *work)
 	struct cifs_tcon *tcon = container_of(work,
 					struct cifs_tcon,
 					query_interfaces.work);
-	struct TCP_Server_Info *server = tcon->ses->server;
 
 	/*
 	 * query server network interfaces, in case they change
 	 */
-	if (!server->ops->query_server_interfaces)
-		return;
-
 	xid = get_xid();
-	rc = server->ops->query_server_interfaces(xid, tcon, false);
+	rc = SMB3_request_interfaces(xid, tcon, false);
 	free_xid(xid);
 
 	if (rc) {
@@ -1737,7 +1736,7 @@ cifs_get_tcp_session(struct smb3_fs_context *ctx,
 	tcp_ses->channel_sequence_num = 0; /* only tracked for primary channel */
 	tcp_ses->reconnect_instance = 1;
 	tcp_ses->lstrp = jiffies;
-	tcp_ses->compression.requested = ctx->compress;
+	tcp_ses->compress_algorithm = cpu_to_le16(ctx->compression);
 	spin_lock_init(&tcp_ses->req_lock);
 	spin_lock_init(&tcp_ses->srv_lock);
 	spin_lock_init(&tcp_ses->mid_lock);
@@ -2803,8 +2802,6 @@ compare_mount_options(struct super_block *sb, struct cifs_mnt_data *mnt_data)
 	if (old->ctx->acdirmax != new->ctx->acdirmax)
 		return 0;
 	if (old->ctx->closetimeo != new->ctx->closetimeo)
-		return 0;
-	if (old->ctx->reparse_type != new->ctx->reparse_type)
 		return 0;
 
 	return 1;

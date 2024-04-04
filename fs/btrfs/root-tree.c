@@ -10,6 +10,7 @@
 #include "messages.h"
 #include "transaction.h"
 #include "disk-io.h"
+#include "print-tree.h"
 #include "qgroup.h"
 #include "space-info.h"
 #include "accessors.h"
@@ -81,14 +82,7 @@ int btrfs_find_root(struct btrfs_root *root, const struct btrfs_key *search_key,
 		if (ret > 0)
 			goto out;
 	} else {
-		/*
-		 * Key with offset -1 found, there would have to exist a root
-		 * with such id, but this is out of the valid range.
-		 */
-		if (ret == 0) {
-			ret = -EUCLEAN;
-			goto out;
-		}
+		BUG_ON(ret == 0);		/* Logical error */
 		if (path->slots[0] == 0)
 			goto out;
 		path->slots[0]--;
@@ -329,11 +323,8 @@ int btrfs_del_root(struct btrfs_trans_handle *trans,
 	ret = btrfs_search_slot(trans, root, key, path, -1, 1);
 	if (ret < 0)
 		goto out;
-	if (ret != 0) {
-		/* The root must exist but we did not find it by the key. */
-		ret = -EUCLEAN;
-		goto out;
-	}
+
+	BUG_ON(ret != 0);
 
 	ret = btrfs_del_item(trans, root, path);
 out:

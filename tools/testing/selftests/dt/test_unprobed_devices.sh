@@ -15,11 +15,15 @@
 
 DIR="$(dirname $(readlink -f "$0"))"
 
-source "${DIR}"/../kselftest/ktap_helpers.sh
+source "${DIR}"/ktap_helpers.sh
 
 PDT=/proc/device-tree/
 COMPAT_LIST="${DIR}"/compatible_list
 IGNORE_LIST="${DIR}"/compatible_ignore_list
+
+KSFT_PASS=0
+KSFT_FAIL=1
+KSFT_SKIP=4
 
 ktap_print_header
 

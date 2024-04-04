@@ -34,18 +34,6 @@ function is_root() {
 	fi
 }
 
-# Check if we can compile the modules before loading them
-function has_kdir() {
-	if [ -z "$KDIR" ]; then
-		KDIR="/lib/modules/$(uname -r)/build"
-	fi
-
-	if [ ! -d "$KDIR" ]; then
-		echo "skip all tests: KDIR ($KDIR) not available to compile modules."
-		exit $ksft_skip
-	fi
-}
-
 # die(msg) - game over, man
 #	msg - dying words
 function die() {
@@ -108,7 +96,6 @@ function cleanup() {
 #		 the ftrace_enabled sysctl.
 function setup_config() {
 	is_root
-	has_kdir
 	push_config
 	set_dynamic_debug
 	set_ftrace_enabled 1
@@ -128,14 +115,16 @@ function loop_until() {
 	done
 }
 
+function assert_mod() {
+	local mod="$1"
+
+	modprobe --dry-run "$mod" &>/dev/null
+}
+
 function is_livepatch_mod() {
 	local mod="$1"
 
-	if [[ ! -f "test_modules/$mod.ko" ]]; then
-		die "Can't find \"test_modules/$mod.ko\", try \"make\""
-	fi
-
-	if [[ $(modinfo "test_modules/$mod.ko" | awk '/^livepatch:/{print $NF}') == "Y" ]]; then
+	if [[ $(modinfo "$mod" | awk '/^livepatch:/{print $NF}') == "Y" ]]; then
 		return 0
 	fi
 
@@ -145,9 +134,9 @@ function is_livepatch_mod() {
 function __load_mod() {
 	local mod="$1"; shift
 
-	local msg="% insmod test_modules/$mod.ko $*"
+	local msg="% modprobe $mod $*"
 	log "${msg%% }"
-	ret=$(insmod "test_modules/$mod.ko" "$@" 2>&1)
+	ret=$(modprobe "$mod" "$@" 2>&1)
 	if [[ "$ret" != "" ]]; then
 		die "$ret"
 	fi
@@ -160,9 +149,12 @@ function __load_mod() {
 
 # load_mod(modname, params) - load a kernel module
 #	modname - module name to load
-#	params  - module parameters to pass to insmod
+#	params  - module parameters to pass to modprobe
 function load_mod() {
 	local mod="$1"; shift
+
+	assert_mod "$mod" ||
+		skip "unable to load module ${mod}, verify CONFIG_TEST_LIVEPATCH=m and run self-tests as root"
 
 	is_livepatch_mod "$mod" &&
 		die "use load_lp() to load the livepatch module $mod"
@@ -173,9 +165,12 @@ function load_mod() {
 # load_lp_nowait(modname, params) - load a kernel module with a livepatch
 #			but do not wait on until the transition finishes
 #	modname - module name to load
-#	params  - module parameters to pass to insmod
+#	params  - module parameters to pass to modprobe
 function load_lp_nowait() {
 	local mod="$1"; shift
+
+	assert_mod "$mod" ||
+		skip "unable to load module ${mod}, verify CONFIG_TEST_LIVEPATCH=m and run self-tests as root"
 
 	is_livepatch_mod "$mod" ||
 		die "module $mod is not a livepatch"
@@ -189,7 +184,7 @@ function load_lp_nowait() {
 
 # load_lp(modname, params) - load a kernel module with a livepatch
 #	modname - module name to load
-#	params  - module parameters to pass to insmod
+#	params  - module parameters to pass to modprobe
 function load_lp() {
 	local mod="$1"; shift
 
@@ -202,13 +197,13 @@ function load_lp() {
 
 # load_failing_mod(modname, params) - load a kernel module, expect to fail
 #	modname - module name to load
-#	params  - module parameters to pass to insmod
+#	params  - module parameters to pass to modprobe
 function load_failing_mod() {
 	local mod="$1"; shift
 
-	local msg="% insmod test_modules/$mod.ko $*"
+	local msg="% modprobe $mod $*"
 	log "${msg%% }"
-	ret=$(insmod "test_modules/$mod.ko" "$@" 2>&1)
+	ret=$(modprobe "$mod" "$@" 2>&1)
 	if [[ "$ret" == "" ]]; then
 		die "$mod unexpectedly loaded"
 	fi

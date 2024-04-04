@@ -85,34 +85,10 @@ static void trigger_kprobe_setup(void)
 	attach_bpf(ctx.skel->progs.bench_trigger_kprobe);
 }
 
-static void trigger_kretprobe_setup(void)
-{
-	setup_ctx();
-	attach_bpf(ctx.skel->progs.bench_trigger_kretprobe);
-}
-
-static void trigger_kprobe_multi_setup(void)
-{
-	setup_ctx();
-	attach_bpf(ctx.skel->progs.bench_trigger_kprobe_multi);
-}
-
-static void trigger_kretprobe_multi_setup(void)
-{
-	setup_ctx();
-	attach_bpf(ctx.skel->progs.bench_trigger_kretprobe_multi);
-}
-
 static void trigger_fentry_setup(void)
 {
 	setup_ctx();
 	attach_bpf(ctx.skel->progs.bench_trigger_fentry);
-}
-
-static void trigger_fexit_setup(void)
-{
-	setup_ctx();
-	attach_bpf(ctx.skel->progs.bench_trigger_fexit);
 }
 
 static void trigger_fentry_sleep_setup(void)
@@ -137,25 +113,12 @@ static void trigger_fmodret_setup(void)
  * GCC doesn't generate stack setup preample for these functions due to them
  * having no input arguments and doing nothing in the body.
  */
-__weak void uprobe_target_nop(void)
+__weak void uprobe_target_with_nop(void)
 {
 	asm volatile ("nop");
 }
 
-__weak void opaque_noop_func(void)
-{
-}
-
-__weak int uprobe_target_push(void)
-{
-	/* overhead of function call is negligible compared to uprobe
-	 * triggering, so this shouldn't affect benchmark results much
-	 */
-	opaque_noop_func();
-	return 1;
-}
-
-__weak void uprobe_target_ret(void)
+__weak void uprobe_target_without_nop(void)
 {
 	asm volatile ("");
 }
@@ -163,34 +126,27 @@ __weak void uprobe_target_ret(void)
 static void *uprobe_base_producer(void *input)
 {
 	while (true) {
-		uprobe_target_nop();
+		uprobe_target_with_nop();
 		atomic_inc(&base_hits.value);
 	}
 	return NULL;
 }
 
-static void *uprobe_producer_nop(void *input)
+static void *uprobe_producer_with_nop(void *input)
 {
 	while (true)
-		uprobe_target_nop();
+		uprobe_target_with_nop();
 	return NULL;
 }
 
-static void *uprobe_producer_push(void *input)
+static void *uprobe_producer_without_nop(void *input)
 {
 	while (true)
-		uprobe_target_push();
+		uprobe_target_without_nop();
 	return NULL;
 }
 
-static void *uprobe_producer_ret(void *input)
-{
-	while (true)
-		uprobe_target_ret();
-	return NULL;
-}
-
-static void usetup(bool use_retprobe, void *target_addr)
+static void usetup(bool use_retprobe, bool use_nop)
 {
 	size_t uprobe_offset;
 	struct bpf_link *link;
@@ -203,7 +159,11 @@ static void usetup(bool use_retprobe, void *target_addr)
 		exit(1);
 	}
 
-	uprobe_offset = get_uprobe_offset(target_addr);
+	if (use_nop)
+		uprobe_offset = get_uprobe_offset(&uprobe_target_with_nop);
+	else
+		uprobe_offset = get_uprobe_offset(&uprobe_target_without_nop);
+
 	link = bpf_program__attach_uprobe(ctx.skel->progs.bench_trigger_uprobe,
 					  use_retprobe,
 					  -1 /* all PIDs */,
@@ -216,34 +176,24 @@ static void usetup(bool use_retprobe, void *target_addr)
 	ctx.skel->links.bench_trigger_uprobe = link;
 }
 
-static void uprobe_setup_nop(void)
+static void uprobe_setup_with_nop(void)
 {
-	usetup(false, &uprobe_target_nop);
+	usetup(false, true);
 }
 
-static void uretprobe_setup_nop(void)
+static void uretprobe_setup_with_nop(void)
 {
-	usetup(true, &uprobe_target_nop);
+	usetup(true, true);
 }
 
-static void uprobe_setup_push(void)
+static void uprobe_setup_without_nop(void)
 {
-	usetup(false, &uprobe_target_push);
+	usetup(false, false);
 }
 
-static void uretprobe_setup_push(void)
+static void uretprobe_setup_without_nop(void)
 {
-	usetup(true, &uprobe_target_push);
-}
-
-static void uprobe_setup_ret(void)
-{
-	usetup(false, &uprobe_target_ret);
-}
-
-static void uretprobe_setup_ret(void)
-{
-	usetup(true, &uprobe_target_ret);
+	usetup(true, false);
 }
 
 const struct bench bench_trig_base = {
@@ -285,50 +235,10 @@ const struct bench bench_trig_kprobe = {
 	.report_final = hits_drops_report_final,
 };
 
-const struct bench bench_trig_kretprobe = {
-	.name = "trig-kretprobe",
-	.validate = trigger_validate,
-	.setup = trigger_kretprobe_setup,
-	.producer_thread = trigger_producer,
-	.measure = trigger_measure,
-	.report_progress = hits_drops_report_progress,
-	.report_final = hits_drops_report_final,
-};
-
-const struct bench bench_trig_kprobe_multi = {
-	.name = "trig-kprobe-multi",
-	.validate = trigger_validate,
-	.setup = trigger_kprobe_multi_setup,
-	.producer_thread = trigger_producer,
-	.measure = trigger_measure,
-	.report_progress = hits_drops_report_progress,
-	.report_final = hits_drops_report_final,
-};
-
-const struct bench bench_trig_kretprobe_multi = {
-	.name = "trig-kretprobe-multi",
-	.validate = trigger_validate,
-	.setup = trigger_kretprobe_multi_setup,
-	.producer_thread = trigger_producer,
-	.measure = trigger_measure,
-	.report_progress = hits_drops_report_progress,
-	.report_final = hits_drops_report_final,
-};
-
 const struct bench bench_trig_fentry = {
 	.name = "trig-fentry",
 	.validate = trigger_validate,
 	.setup = trigger_fentry_setup,
-	.producer_thread = trigger_producer,
-	.measure = trigger_measure,
-	.report_progress = hits_drops_report_progress,
-	.report_final = hits_drops_report_final,
-};
-
-const struct bench bench_trig_fexit = {
-	.name = "trig-fexit",
-	.validate = trigger_validate,
-	.setup = trigger_fexit_setup,
 	.producer_thread = trigger_producer,
 	.measure = trigger_measure,
 	.report_progress = hits_drops_report_progress,
@@ -364,55 +274,37 @@ const struct bench bench_trig_uprobe_base = {
 	.report_final = hits_drops_report_final,
 };
 
-const struct bench bench_trig_uprobe_nop = {
-	.name = "trig-uprobe-nop",
-	.setup = uprobe_setup_nop,
-	.producer_thread = uprobe_producer_nop,
+const struct bench bench_trig_uprobe_with_nop = {
+	.name = "trig-uprobe-with-nop",
+	.setup = uprobe_setup_with_nop,
+	.producer_thread = uprobe_producer_with_nop,
 	.measure = trigger_measure,
 	.report_progress = hits_drops_report_progress,
 	.report_final = hits_drops_report_final,
 };
 
-const struct bench bench_trig_uretprobe_nop = {
-	.name = "trig-uretprobe-nop",
-	.setup = uretprobe_setup_nop,
-	.producer_thread = uprobe_producer_nop,
+const struct bench bench_trig_uretprobe_with_nop = {
+	.name = "trig-uretprobe-with-nop",
+	.setup = uretprobe_setup_with_nop,
+	.producer_thread = uprobe_producer_with_nop,
 	.measure = trigger_measure,
 	.report_progress = hits_drops_report_progress,
 	.report_final = hits_drops_report_final,
 };
 
-const struct bench bench_trig_uprobe_push = {
-	.name = "trig-uprobe-push",
-	.setup = uprobe_setup_push,
-	.producer_thread = uprobe_producer_push,
+const struct bench bench_trig_uprobe_without_nop = {
+	.name = "trig-uprobe-without-nop",
+	.setup = uprobe_setup_without_nop,
+	.producer_thread = uprobe_producer_without_nop,
 	.measure = trigger_measure,
 	.report_progress = hits_drops_report_progress,
 	.report_final = hits_drops_report_final,
 };
 
-const struct bench bench_trig_uretprobe_push = {
-	.name = "trig-uretprobe-push",
-	.setup = uretprobe_setup_push,
-	.producer_thread = uprobe_producer_push,
-	.measure = trigger_measure,
-	.report_progress = hits_drops_report_progress,
-	.report_final = hits_drops_report_final,
-};
-
-const struct bench bench_trig_uprobe_ret = {
-	.name = "trig-uprobe-ret",
-	.setup = uprobe_setup_ret,
-	.producer_thread = uprobe_producer_ret,
-	.measure = trigger_measure,
-	.report_progress = hits_drops_report_progress,
-	.report_final = hits_drops_report_final,
-};
-
-const struct bench bench_trig_uretprobe_ret = {
-	.name = "trig-uretprobe-ret",
-	.setup = uretprobe_setup_ret,
-	.producer_thread = uprobe_producer_ret,
+const struct bench bench_trig_uretprobe_without_nop = {
+	.name = "trig-uretprobe-without-nop",
+	.setup = uretprobe_setup_without_nop,
+	.producer_thread = uprobe_producer_without_nop,
 	.measure = trigger_measure,
 	.report_progress = hits_drops_report_progress,
 	.report_final = hits_drops_report_final,

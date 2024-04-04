@@ -3,7 +3,7 @@
  * Checksum library
  *
  * Influenced by arch/arm64/lib/csum.c
- * Copyright (C) 2023-2024 Rivos Inc.
+ * Copyright (C) 2023 Rivos Inc.
  */
 #include <linux/bitops.h>
 #include <linux/compiler.h>
@@ -318,7 +318,10 @@ unsigned int do_csum(const unsigned char *buff, int len)
 	 * branches. The largest chunk of overlap was delegated into the
 	 * do_csum_common function.
 	 */
-	if (has_fast_unaligned_accesses() || (((unsigned long)buff & OFFSET_MASK) == 0))
+	if (static_branch_likely(&fast_misaligned_access_speed_key))
+		return do_csum_no_alignment(buff, len);
+
+	if (((unsigned long)buff & OFFSET_MASK) == 0)
 		return do_csum_no_alignment(buff, len);
 
 	return do_csum_with_alignment(buff, len);

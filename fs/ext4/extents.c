@@ -4111,10 +4111,10 @@ insert_hole:
  *
  * Need to be called with
  * down_read(&EXT4_I(inode)->i_data_sem) if not allocating file system block
- * (ie, flags is zero). Otherwise down_write(&EXT4_I(inode)->i_data_sem)
+ * (ie, create is zero). Otherwise down_write(&EXT4_I(inode)->i_data_sem)
  *
  * return > 0, number of blocks already mapped/allocated
- *          if flags doesn't contain EXT4_GET_BLOCKS_CREATE and these are pre-allocated blocks
+ *          if create == 0 and these are pre-allocated blocks
  *          	buffer head is unmapped
  *          otherwise blocks are mapped
  *
@@ -4218,7 +4218,7 @@ int ext4_ext_map_blocks(handle_t *handle, struct inode *inode,
 
 	/*
 	 * requested block isn't allocated yet;
-	 * we couldn't try to create block if flags doesn't contain EXT4_GET_BLOCKS_CREATE
+	 * we couldn't try to create block if create flag is zero
 	 */
 	if ((flags & EXT4_GET_BLOCKS_CREATE) == 0) {
 		ext4_lblk_t len;

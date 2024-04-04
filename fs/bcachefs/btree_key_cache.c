@@ -380,11 +380,9 @@ static int btree_key_cache_fill(struct btree_trans *trans,
 	struct bkey_i *new_k = NULL;
 	int ret;
 
-	bch2_trans_iter_init(trans, &iter, ck->key.btree_id, ck->key.pos,
-			     BTREE_ITER_KEY_CACHE_FILL|
-			     BTREE_ITER_CACHED_NOFILL);
-	iter.flags &= ~BTREE_ITER_WITH_JOURNAL;
-	k = bch2_btree_iter_peek_slot(&iter);
+	k = bch2_bkey_get_iter(trans, &iter, ck->key.btree_id, ck->key.pos,
+			       BTREE_ITER_KEY_CACHE_FILL|
+			       BTREE_ITER_CACHED_NOFILL);
 	ret = bkey_err(k);
 	if (ret)
 		goto err;
@@ -676,7 +674,7 @@ static int btree_key_cache_flush_pos(struct btree_trans *trans,
 			     !bch2_err_matches(ret, BCH_ERR_transaction_restart) &&
 			     !bch2_err_matches(ret, BCH_ERR_journal_reclaim_would_deadlock) &&
 			     !bch2_journal_error(j), c,
-			     "flushing key cache: %s", bch2_err_str(ret));
+			     "error flushing key cache: %s", bch2_err_str(ret));
 	if (ret)
 		goto out;
 

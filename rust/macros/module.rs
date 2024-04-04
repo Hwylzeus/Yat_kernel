@@ -222,15 +222,10 @@ pub(crate) fn module(ts: TokenStream) -> TokenStream {
             }};
 
             // Loadable modules need to export the `{{init,cleanup}}_module` identifiers.
-            /// # Safety
-            ///
-            /// This function must not be called after module initialization, because it may be
-            /// freed after that completes.
             #[cfg(MODULE)]
             #[doc(hidden)]
             #[no_mangle]
-            #[link_section = \".init.text\"]
-            pub unsafe extern \"C\" fn init_module() -> core::ffi::c_int {{
+            pub extern \"C\" fn init_module() -> core::ffi::c_int {{
                 __init()
             }}
 

@@ -2,7 +2,6 @@
 /* Copyright (C) 2023 Intel Corporation */
 
 #include "idpf.h"
-#include "idpf_virtchnl.h"
 
 /**
  * idpf_buf_lifo_push - push a buffer pointer onto stack

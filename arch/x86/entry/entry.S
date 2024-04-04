@@ -10,8 +10,6 @@
 #include <asm/segment.h>
 #include <asm/cache.h>
 
-#include "calling.h"
-
 .pushsection .noinstr.text, "ax"
 
 SYM_FUNC_START(entry_ibpb)
@@ -45,4 +43,3 @@ EXPORT_SYMBOL_GPL(mds_verw_sel);
 
 .popsection
 
-THUNK warn_thunk_thunk, __warn_thunk

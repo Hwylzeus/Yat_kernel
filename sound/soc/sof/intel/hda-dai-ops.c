@@ -522,17 +522,6 @@ static const struct hda_dai_widget_dma_ops hda_ipc4_chain_dma_ops = {
 	.get_hlink = hda_get_hlink,
 };
 
-static const struct hda_dai_widget_dma_ops sdw_ipc4_chain_dma_ops = {
-	.get_hext_stream = hda_get_hext_stream,
-	.assign_hext_stream = hda_assign_hext_stream,
-	.release_hext_stream = hda_release_hext_stream,
-	.setup_hext_stream = hda_setup_hext_stream,
-	.reset_hext_stream = hda_reset_hext_stream,
-	.trigger = hda_trigger,
-	.calc_stream_format = generic_calc_stream_format,
-	.get_hlink = sdw_get_hlink,
-};
-
 static int hda_ipc3_post_trigger(struct snd_sof_dev *sdev, struct snd_soc_dai *cpu_dai,
 				 struct snd_pcm_substream *substream, int cmd)
 {
@@ -607,13 +596,6 @@ static const struct hda_dai_widget_dma_ops hda_dspless_dma_ops = {
 	.get_hlink = hda_get_hlink,
 };
 
-static const struct hda_dai_widget_dma_ops sdw_dspless_dma_ops = {
-	.get_hext_stream = hda_dspless_get_hext_stream,
-	.setup_hext_stream = hda_dspless_setup_hext_stream,
-	.calc_stream_format = generic_calc_stream_format,
-	.get_hlink = sdw_get_hlink,
-};
-
 #endif
 
 const struct hda_dai_widget_dma_ops *
@@ -621,23 +603,11 @@ hda_select_dai_widget_ops(struct snd_sof_dev *sdev, struct snd_sof_widget *swidg
 {
 #if IS_ENABLED(CONFIG_SND_SOC_SOF_HDA_LINK)
 	struct snd_sof_dai *sdai;
-	const struct sof_intel_dsp_desc *chip;
 
-	chip = get_chip_info(sdev->pdata);
+	if (sdev->dspless_mode_selected)
+		return &hda_dspless_dma_ops;
+
 	sdai = swidget->private;
-
-	if (sdev->dspless_mode_selected) {
-		switch (sdai->type) {
-		case SOF_DAI_INTEL_HDA:
-			return &hda_dspless_dma_ops;
-		case SOF_DAI_INTEL_ALH:
-			if (chip->hw_ip_version < SOF_INTEL_ACE_2_0)
-				return NULL;
-			return &sdw_dspless_dma_ops;
-		default:
-			return NULL;
-		}
-	}
 
 	switch (sdev->pdata->ipc_type) {
 	case SOF_IPC_TYPE_3:
@@ -650,15 +620,22 @@ hda_select_dai_widget_ops(struct snd_sof_dev *sdev, struct snd_sof_widget *swidg
 	}
 	case SOF_IPC_TYPE_4:
 	{
-		struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
-		struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
+		struct sof_ipc4_copier *ipc4_copier = sdai->private;
+		const struct sof_intel_dsp_desc *chip;
 
-		switch (sdai->type) {
+		chip = get_chip_info(sdev->pdata);
+
+		switch (ipc4_copier->dai_type) {
 		case SOF_DAI_INTEL_HDA:
+		{
+			struct snd_sof_widget *pipe_widget = swidget->spipe->pipe_widget;
+			struct sof_ipc4_pipeline *pipeline = pipe_widget->private;
+
 			if (pipeline->use_chain_dma)
 				return &hda_ipc4_chain_dma_ops;
 
 			return &hda_ipc4_dma_ops;
+		}
 		case SOF_DAI_INTEL_SSP:
 			if (chip->hw_ip_version < SOF_INTEL_ACE_2_0)
 				return NULL;
@@ -670,8 +647,6 @@ hda_select_dai_widget_ops(struct snd_sof_dev *sdev, struct snd_sof_widget *swidg
 		case SOF_DAI_INTEL_ALH:
 			if (chip->hw_ip_version < SOF_INTEL_ACE_2_0)
 				return NULL;
-			if (pipeline->use_chain_dma)
-				return &sdw_ipc4_chain_dma_ops;
 			return &sdw_ipc4_dma_ops;
 
 		default:
