@@ -602,6 +602,14 @@ static int __init rdinit_setup(char *str)
 }
 __setup("rdinit=", rdinit_setup);
 
+unsigned int sched_class_yat_on;
+static int __init set_sched_class_yat_on(char *str)
+{
+    sched_class_yat_on = 1;
+    return 1;
+}
+early_param("fully-paritioned-fixed-priority-scheduling_class", set_sched_class_yat_on);
+
 #ifndef CONFIG_SMP
 static const unsigned int setup_max_cpus = NR_CPUS;
 static inline void setup_nr_cpu_ids(void) { }

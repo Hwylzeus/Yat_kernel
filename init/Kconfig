@@ -1279,6 +1279,12 @@ config CHECKPOINT_RESTORE
 
 	  If unsure, say N here.
 
+config SCHED_CLASS_YAT
+	bool "YAT(Yet Another Toy) sched class"
+	default n
+	help
+		Allow user to create "fully paritioned fixed-priority scheduling" task.
+
 config SCHED_AUTOGROUP
 	bool "Automatic process group scheduling"
 	select CGROUPS
