@@ -1,20 +1,29 @@
 // CONFIG_SCHED_CLASS_YAT
 
+void init_yat_rq(struct yat_rq *yat_rq)
+{
+	yat_rq->agent = NULL;
+}
+
 /*
  * Used by sched_fork() and __setscheduler_prio() to pick the matching
- * sched_class. dl/rt are already handled.
+ * sched_class. dl are already handled.
  */
-bool task_should_yat(struct task_struct *p)
+bool yat_prio(struct task_struct *p)
 {
-	return p->policy == SCHED_YAT;
+	printk("\n\n======enter judge: yat_prio======, policy:%d \n\n", p->policy);
+	// return p->policy == SCHED_YAT;
+	return 1;
 }
 
 void enqueue_task_yat(struct rq *rq, struct task_struct *p, int flags) {
-	printk("enqueue_task_yat\n");
+	rq->yat.agent = p;
+	printk("======enqueue_task_yat  %d\n", p->pid);
 }
 
 void dequeue_task_yat(struct rq *rq, struct task_struct *p, int flags) {
-	printk("dequeue_task_yat %d\n", p->pid);
+	rq->yat.agent = NULL;
+	printk("======dequeue_task_yat  %d\n", p->pid);
 }
 
 void yield_task_yat(struct rq *rq) {
@@ -32,7 +41,8 @@ void wakeup_preempt_yat(struct rq *rq, struct task_struct *p, int flags) {
 
 struct task_struct *pick_next_task_yat(struct rq *rq) {
 	// printk("hello\n");
-	return NULL;
+	// return NULL;
+	return rq->yat.agent;
 }
 
 void put_prev_task_yat(struct rq *rq, struct task_struct *p) {

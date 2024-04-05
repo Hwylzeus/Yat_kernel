@@ -1,6 +1,6 @@
 extern const struct sched_class yat_sched_class;
 
-bool task_should_yat(struct task_struct *p);
+bool yat_prio(struct task_struct *p);
 
 void enqueue_task_yat(struct rq *rq, struct task_struct *p, int flags);
 

@@ -6619,6 +6619,10 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 
 	schedule_debug(prev, !!sched_mode);
 
+#ifdef CONFIG_SCHED_CLASS_YAT
+	// printk("sched_mode: %u\n", sched_mode);
+#endif
+
 	if (sched_feat(HRTICK) || sched_feat(HRTICK_DL))
 		hrtick_clear(rq);
 
@@ -6807,6 +6811,10 @@ static __always_inline void __schedule_loop(unsigned int sched_mode)
 asmlinkage __visible void __sched schedule(void)
 {
 	struct task_struct *tsk = current;
+
+#ifdef CONFIG_SCHED_CLASS_YAT
+	// printk("here\n");
+#endif
 
 #ifdef CONFIG_RT_MUTEXES
 	lockdep_assert(!tsk->sched_rt_mutex);
@@ -7062,14 +7070,24 @@ EXPORT_SYMBOL(default_wake_function);
 
 static void __setscheduler_prio(struct task_struct *p, int prio)
 {
-	if (dl_prio(prio))
+	if (dl_prio(prio)){
+// #ifdef CONFIG_SCHED_CLASS_YAT
+// 		printk("\n\n======select dl dl dl dl======\n\n");
+// #endif
 		p->sched_class = &dl_sched_class;
-	else if (rt_prio(prio))
-		p->sched_class = &rt_sched_class;
+	}
 #ifdef CONFIG_SCHED_CLASS_YAT
-	else if (task_should_yat(p))
+	else if (yat_prio(p)){
 		p->sched_class = &yat_sched_class;
+		printk("\n\n======select yat yat yat yat======\n\n");
+	}
 #endif
+	else if (rt_prio(prio)){
+// #ifdef CONFIG_SCHED_CLASS_YAT
+// 		printk("\n\n======select rt rt rt rt======\n\n");
+// #endif
+		p->sched_class = &rt_sched_class;
+	}
 	else
 		p->sched_class = &fair_sched_class;
 
@@ -9987,6 +10005,11 @@ void __init sched_init(void)
 		init_cfs_rq(&rq->cfs);
 		init_rt_rq(&rq->rt);
 		init_dl_rq(&rq->dl);
+#ifdef CONFIG_SCHED_CLASS_YAT
+		printk("======init yat rq======\n");
+		init_yat_rq(&rq->yat);
+#endif
+
 #ifdef CONFIG_FAIR_GROUP_SCHED
 		INIT_LIST_HEAD(&rq->leaf_cfs_rq_list);
 		rq->tmp_alone_branch = &rq->leaf_cfs_rq_list;
