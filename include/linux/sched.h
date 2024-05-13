@@ -46,6 +46,7 @@
 #include <linux/livepatch_sched.h>
 #include <linux/uidgid_types.h>
 #include <asm/kmap_size.h>
+#include <yat/rt_param.h>
 
 /* task_struct member predeclarations (sorted alphabetically): */
 struct audit_context;
@@ -1353,6 +1354,9 @@ struct task_struct {
 	int				nr_dirtied_pause;
 	/* Start of a write-and-pause period: */
 	unsigned long			dirty_paused_when;
+
+	/* YAT RT parameters and state */
+	struct rt_param rt_param;
 
 #ifdef CONFIG_LATENCYTOP
 	int				latency_record_count;
